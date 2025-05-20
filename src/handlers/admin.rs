@@ -1,11 +1,11 @@
 use crate::types::Config;
-use crate::utils::{get_config_path, CONFIG_CACHE};
+use crate::utils::{CONFIG_CACHE, get_config_path};
 use askama::Template;
-use tracing::{debug, info};
 use salvo::basic_auth::{BasicAuth, BasicAuthValidator};
 use salvo::prelude::*;
 use serde_json::json;
 use std::fs;
+use tracing::{debug, info};
 
 #[derive(Template)]
 #[template(path = "admin.html")]

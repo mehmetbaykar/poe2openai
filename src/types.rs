@@ -2,6 +2,19 @@ use crate::utils::deserialize_content;
 use poe_api_process::types::{Tool, ToolCall};
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize)]
+pub struct Usage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    pub prompt_tokens_details: PromptTokensDetails,
+}
+
+#[derive(Serialize)]
+pub struct PromptTokensDetails {
+    pub cached_tokens: u32,
+}
+
 #[derive(Deserialize)]
 pub struct ChatCompletionRequest {
     pub model: String,
@@ -10,6 +23,12 @@ pub struct ChatCompletionRequest {
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    pub stream_options: Option<StreamOptions>,
+}
+
+#[derive(Deserialize)]
+pub struct StreamOptions {
+    pub include_usage: Option<bool>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]

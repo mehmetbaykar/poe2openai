@@ -1,4 +1,4 @@
-use poe_api_process::{get_model_list, ModelInfo};
+use poe_api_process::{ModelInfo, get_model_list};
 use salvo::prelude::*;
 use serde_json::json;
 use std::collections::HashSet;
@@ -98,8 +98,8 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
             let mut write_guard = API_MODELS_CACHE.write().await;
             // 再次檢查，防止在獲取寫入鎖期間其他線程已填充緩存
             if let Some(cached_data) = &*write_guard {
-                 debug!("✅ API 模型緩存在等待寫入鎖時由另一個執行緒填充。");
-                 api_models_data_arc = cached_data.clone();
+                debug!("✅ API 模型緩存在等待寫入鎖時由另一個執行緒填充。");
+                api_models_data_arc = cached_data.clone();
             } else {
                 // 緩存確實是空的，從 API 獲取數據
                 info!("⏳ 從 API 取得模型以填充快取中……");
@@ -123,16 +123,19 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                         let duration = start_time.elapsed(); // 計算耗時
                         error!(
                             "❌ 無法填充 API 模型快取：{} | 耗時：{}。",
-                             e, crate::utils::format_duration(duration) // 在日誌中使用 duration
+                            e,
+                            crate::utils::format_duration(duration) // 在日誌中使用 duration
                         );
                         res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
-                        res.render(Json(json!({ "error": format!("未能檢索模型列表以填充快取：{}", e) })));
+                        res.render(Json(
+                            json!({ "error": format!("未能檢索模型列表以填充快取：{}", e) }),
+                        ));
                         drop(write_guard);
                         return;
                     }
                 }
             }
-             drop(write_guard);
+            drop(write_guard);
         }
 
         let mut api_model_ids: HashSet<String> = HashSet::new();
@@ -150,10 +153,16 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                     if yaml_config.enable.unwrap_or(true) {
                         let final_id = if let Some(mapping) = &yaml_config.mapping {
                             let new_id = mapping.to_lowercase();
-                            debug!("🔄 API 模型改名 (YAML 啟用): {} -> {}", api_model_id_lower, new_id);
+                            debug!(
+                                "🔄 API 模型改名 (YAML 啟用): {} -> {}",
+                                api_model_id_lower, new_id
+                            );
                             new_id
                         } else {
-                            debug!("✅ 保留 API 模型 (YAML 啟用，無 mapping): {}", api_model_id_lower);
+                            debug!(
+                                "✅ 保留 API 模型 (YAML 啟用，無 mapping): {}",
+                                api_model_id_lower
+                            );
                             api_model_id_lower.clone()
                         };
                         processed_models_enabled.push(ModelInfo {
@@ -192,7 +201,6 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
         );
 
         res.render(Json(response));
-
     } else {
         info!("🔌 YAML 停用，直接從 Poe API 獲取模型列表 (無緩存，無 YAML 規則)...");
 
@@ -227,7 +235,9 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                     crate::utils::format_duration(duration)
                 );
                 res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
-                res.render(Json(json!({ "error": format!("無法直接從API獲取模型：{}", e) })));
+                res.render(Json(
+                    json!({ "error": format!("無法直接從API獲取模型：{}", e) }),
+                ));
             }
         }
     }

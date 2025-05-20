@@ -1,3 +1,9 @@
+use crate::poe_client::{PoeClientWrapper, create_query_request};
+use crate::types::*;
+use crate::utils::{
+    count_completion_tokens, count_message_tokens, format_bytes_length, format_duration,
+    get_cached_config,
+};
 use chrono::Utc;
 use futures_util::future;
 use futures_util::stream::{self, Stream, StreamExt};
@@ -7,27 +13,21 @@ use salvo::http::header;
 use salvo::prelude::*;
 use serde_json::json;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing::{debug, error, info};
-
-use crate::types::*;
-use crate::poe_client::{PoeClientWrapper, create_query_request};
-use crate::utils::{format_bytes_length, format_duration,get_cached_config};
-
 #[handler]
 pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     let start_time = Instant::now();
     info!("📝 收到新的聊天完成請求");
-
     let max_size: usize = std::env::var("MAX_REQUEST_SIZE")
         .unwrap_or_else(|_| "1073741824".to_string())
         .parse()
         .unwrap_or(1024 * 1024 * 1024);
-
     // 從緩存獲取 models.yaml 配置
     let config = get_cached_config().await;
     debug!("🔧 從緩存獲取配置 | 啟用狀態: {:?}", config.enable);
-
     let access_key = match req.headers().get("Authorization") {
         Some(auth) => {
             let auth_str = auth.to_str().unwrap_or("");
@@ -48,7 +48,6 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
             return;
         }
     };
-
     let chat_request = match req.payload_with_max_size(max_size).await {
         Ok(bytes) => match serde_json::from_slice::<ChatCompletionRequest>(bytes) {
             Ok(req) => {
@@ -88,11 +87,9 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
             return;
         }
     };
-
     // 尋找映射的原始模型名稱
     let (display_model, original_model) = if config.enable.unwrap_or(false) {
         let requested_model = chat_request.model.clone();
-
         // 檢查當前請求的模型是否是某個映射的目標
         let mapping_entry = config.models.iter().find(|(_, cfg)| {
             if let Some(mapping) = &cfg.mapping {
@@ -101,7 +98,6 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
                 false
             }
         });
-
         if let Some((original_name, _)) = mapping_entry {
             // 如果找到映射，使用原始模型名稱
             debug!("🔄 反向模型映射: {} -> {}", requested_model, original_name);
@@ -125,27 +121,52 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
         // 配置未啟用，直接使用原始名稱
         (chat_request.model.clone(), chat_request.model.clone())
     };
-
     info!("🤖 使用模型: {} (原始: {})", display_model, original_model);
-
     let client = PoeClientWrapper::new(&original_model, &access_key);
-
+    // 計算 prompt_tokens
+    let messages_clone = chat_request.messages.clone();
+    let prompt_tokens = count_message_tokens(&messages_clone);
+    debug!("📊 計算 prompt_tokens: {}", prompt_tokens);
+    let stream = chat_request.stream.unwrap_or(false);
+    debug!("🔄 請求模式: {}", if stream { "串流" } else { "非串流" });
     let query_request: poe_api_process::QueryRequest = create_query_request(
         &original_model,
         chat_request.messages,
         chat_request.temperature,
         chat_request.tools,
-    ).await;
-
-    let stream = chat_request.stream.unwrap_or(false);
-    debug!("🔄 請求模式: {}", if stream { "串流" } else { "非串流" });
-
+    )
+    .await;
+    // 檢查是否需要包含 usage 統計
+    let include_usage = chat_request
+        .stream_options
+        .as_ref()
+        .and_then(|opts| opts.include_usage)
+        .unwrap_or(false);
+    debug!("📊 是否包含 usage 統計: {}", include_usage);
+    // 創建一個共享的計數器用於跟踪 completion_tokens
+    let completion_tokens_counter = Arc::new(AtomicU32::new(0));
     match client.stream_request(query_request).await {
         Ok(event_stream) => {
             if stream {
-                handle_stream_response(res, event_stream, &display_model).await;
+                handle_stream_response(
+                    res,
+                    event_stream,
+                    &display_model,
+                    include_usage,
+                    prompt_tokens,
+                    Arc::clone(&completion_tokens_counter),
+                )
+                .await;
             } else {
-                handle_non_stream_response(res, event_stream, &display_model).await;
+                handle_non_stream_response(
+                    res,
+                    event_stream,
+                    &display_model,
+                    include_usage,
+                    prompt_tokens,
+                    Arc::clone(&completion_tokens_counter),
+                )
+                .await;
             }
         }
         Err(e) => {
@@ -154,16 +175,13 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
             res.render(Json(json!({ "error": e.to_string() })));
         }
     }
-
     let duration = start_time.elapsed();
     info!("✅ 請求處理完成 | 耗時: {}", format_duration(duration));
 }
-
 fn convert_poe_error_to_openai(
     error: &poe_api_process::types::ErrorResponse,
 ) -> (StatusCode, OpenAIErrorResponse) {
     debug!("🔄 轉換錯誤響應 | 錯誤文本: {}", error.text);
-
     let (status, error_type, code) = if error.text.contains("Internal server error") {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -183,13 +201,11 @@ fn convert_poe_error_to_openai(
     } else {
         (StatusCode::BAD_REQUEST, "invalid_request", "bad_request")
     };
-
     debug!(
         "📋 錯誤轉換結果 | 狀態碼: {} | 錯誤類型: {}",
         status.as_u16(),
         error_type
     );
-
     (
         status,
         OpenAIErrorResponse {
@@ -202,30 +218,31 @@ fn convert_poe_error_to_openai(
         },
     )
 }
-
 async fn handle_stream_response(
     res: &mut Response,
     mut event_stream: Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>,
     model: &str,
+    include_usage: bool,
+    prompt_tokens: u32,
+    completion_tokens_counter: Arc<AtomicU32>,
 ) {
     let start_time = Instant::now();
     let id = nanoid!(10);
     let created = Utc::now().timestamp();
-    let model = model.to_string(); // 轉換為擁有的 String
-
-    info!("🌊 開始處理串流響應 | ID: {} | 模型: {}", id, model);
-
+    let model = model.to_string();
+    info!(
+        "🌊 開始處理串流響應 | ID: {} | 模型: {} | 包含使用統計: {}",
+        id, model, include_usage
+    );
     res.headers_mut()
         .insert(header::CONTENT_TYPE, "text/event-stream".parse().unwrap());
     res.headers_mut()
         .insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
     res.headers_mut()
         .insert(header::CONNECTION, "keep-alive".parse().unwrap());
-
     let mut replace_response = false;
     let mut full_content = String::new();
     let mut first_two_events = Vec::new();
-
     debug!("🔍 檢查初始事件");
     for _ in 0..2 {
         if let Some(Ok(event)) = event_stream.next().await {
@@ -233,7 +250,6 @@ async fn handle_stream_response(
             first_two_events.push(event);
         }
     }
-
     for event in first_two_events {
         match event.event {
             EventType::ReplaceResponse => {
@@ -275,61 +291,85 @@ async fn handle_stream_response(
             }
         }
     }
-
-    let id_for_log = id.clone(); // 為最後的日誌克隆一個副本
-
+    let id_for_log = id.clone();
     if replace_response {
         debug!("🔄 使用 ReplaceResponse 處理模式");
         let processed_stream = {
-            let id = id.clone(); // 為閉包克隆一個副本
-            let model = model.clone(); // 為閉包克隆一個副本
-            let initial_content_for_handler = full_content.clone(); // 複製初始內容以傳遞
-
+            let id = id.clone();
+            let model = model.clone();
+            let initial_content_for_handler = full_content.clone();
             stream::once(async move {
                 // 將初始內容傳遞給 handle_replace_response
-                let content =
-                    handle_replace_response(event_stream, initial_content_for_handler).await;
+                let content = handle_replace_response(
+                    event_stream,
+                    initial_content_for_handler,
+                    Arc::clone(&completion_tokens_counter),
+                    include_usage,
+                )
+                .await;
+                let completion_tokens = if include_usage {
+                    completion_tokens_counter.load(Ordering::SeqCst)
+                } else {
+                    0
+                };
+                let total_tokens = prompt_tokens + completion_tokens;
                 debug!(
-                    "📤 ReplaceResponse 處理完成 | 最終內容長度: {}",
-                    format_bytes_length(content.len())
+                    "📤 ReplaceResponse 處理完成 | 最終內容長度: {} | Token 數: {}",
+                    format_bytes_length(content.len()),
+                    completion_tokens
                 );
-
                 let content_chunk = create_stream_chunk(&id, created, &model, &content, None);
                 let content_json = serde_json::to_string(&content_chunk).unwrap();
                 let content_message = format!("data: {}\n\n", content_json);
-
                 let final_chunk =
                     create_stream_chunk(&id, created, &model, "", Some("stop".to_string()));
-                let final_json = serde_json::to_string(&final_chunk).unwrap();
-                let final_message = format!(
-                    "{}data: {}\n\ndata: [DONE]\n\n",
-                    content_message, final_json
-                );
-
+                let final_message = if include_usage {
+                    debug!(
+                        "📊 Token 使用統計 | prompt_tokens: {} | completion_tokens: {} | total_tokens: {}",
+                        prompt_tokens, completion_tokens, total_tokens
+                    );
+                    let mut final_json = serde_json::to_value(&final_chunk).unwrap();
+                    final_json["usage"] = serde_json::json!({
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                        "prompt_tokens_details": {"cached_tokens": 0}
+                    });
+                    format!(
+                        "{}data: {}\n\ndata: [DONE]\n\n",
+                        content_message,
+                        serde_json::to_string(&final_json).unwrap()
+                    )
+                } else {
+                    let final_json = serde_json::to_string(&final_chunk).unwrap();
+                    format!(
+                        "{}data: {}\n\ndata: [DONE]\n\n",
+                        content_message, final_json
+                    )
+                };
                 Ok::<_, std::convert::Infallible>(final_message)
             })
         };
-
         res.stream(processed_stream);
     } else {
         debug!("🔄 使用標準串流處理模式");
         let initial_chunk = create_stream_chunk(&id, created, &model, &full_content, None);
         let initial_chunk_json = serde_json::to_string(&initial_chunk).unwrap();
         let initial_message = format!("data: {}\n\n", initial_chunk_json);
-
+        // 基於Arc 共享的累積文本
+        let accumulated_text = Arc::new(Mutex::new(full_content.clone()));
         let processed_stream = {
-            let id = id.clone(); // 為閉包克隆一個副本
-            let model = model.clone(); // 為閉包克隆一個副本
-
-            stream::once(future::ready(Ok::<_, std::convert::Infallible>(
-                initial_message,
-            )))
+            let id = id.clone();
+            let model = model.clone();
+            let accumulated_text_clone = Arc::clone(&accumulated_text);
+            stream::once(future::ready(Ok::<_, std::convert::Infallible>(initial_message)))
             .chain(stream::unfold(
                 (event_stream, false),
                 move |(mut event_stream, mut is_done)| {
                     let id = id.clone();
                     let model = model.clone();
-
+                    let completion_tokens_counter_clone = Arc::clone(&completion_tokens_counter);
+                    let accumulated_text_clone = Arc::clone(&accumulated_text_clone);
                     async move {
                         if is_done {
                             debug!("✅ 串流處理完成");
@@ -339,6 +379,8 @@ async fn handle_stream_response(
                             Some(Ok(event)) => match event.event {
                                 EventType::Text => {
                                     if let Some(data) = event.data {
+                                        // 收集文本以便在最後計算 tokens
+                                        accumulated_text_clone.lock().unwrap().push_str(&data.text);
                                         let chunk = create_stream_chunk(
                                             &id, created, &model, &data.text, None,
                                         );
@@ -352,10 +394,10 @@ async fn handle_stream_response(
                                     }
                                 }
                                 EventType::Json => {
+                                    debug!("📝 收到 JSON 事件");
                                     // 處理工具調用事件
                                     if let Some(tool_calls) = event.tool_calls {
                                         debug!("🔧 處理工具調用，數量: {}", tool_calls.len());
-
                                         // 創建包含工具調用的 delta
                                         let tool_delta = Delta {
                                             role: Some("assistant".to_string()),
@@ -363,7 +405,6 @@ async fn handle_stream_response(
                                             refusal: None,
                                             tool_calls: Some(tool_calls),
                                         };
-
                                         // 創建包含工具調用的 chunk
                                         let tool_chunk = ChatCompletionChunk {
                                             id: format!("chatcmpl-{}", id),
@@ -376,11 +417,9 @@ async fn handle_stream_response(
                                                 finish_reason: Some("tool_calls".to_string()),
                                             }],
                                         };
-
                                         let tool_chunk_json =
                                             serde_json::to_string(&tool_chunk).unwrap();
                                         debug!("📤 發送工具調用 chunk");
-
                                         Some((
                                             Ok(format!("data: {}\n\n", tool_chunk_json)),
                                             (event_stream, is_done),
@@ -412,22 +451,59 @@ async fn handle_stream_response(
                                 EventType::Done => {
                                     debug!("✅ 串流完成");
                                     is_done = true;
-                                    let final_chunk = create_stream_chunk(
-                                        &id,
-                                        created,
-                                        &model,
-                                        "",
-                                        Some("stop".to_string()),
-                                    );
-                                    let final_chunk_json =
-                                        serde_json::to_string(&final_chunk).unwrap();
-                                    Some((
-                                        Ok(format!(
-                                            "data: {}\n\ndata: [DONE]\n\n",
-                                            final_chunk_json
-                                        )),
-                                        (event_stream, is_done),
-                                    ))
+                                    let completion_tokens = if include_usage {
+                                        // 獲取累積的完整文本
+                                        let full_text = accumulated_text_clone.lock().unwrap().clone();
+                                        // 計算完整文本的 tokens 並更新計數器
+                                        let tokens = count_completion_tokens(&full_text);
+                                        completion_tokens_counter_clone.store(tokens, Ordering::SeqCst);
+                                        tokens
+                                    } else {
+                                        0
+                                    };
+                                    if include_usage {
+                                        let total_tokens = prompt_tokens + completion_tokens;
+                                        debug!("📊 Token 使用統計 | prompt_tokens: {} | completion_tokens: {} | total_tokens: {}",
+                                            prompt_tokens, completion_tokens, total_tokens);
+                                        let final_chunk = create_stream_chunk(
+                                            &id,
+                                            created,
+                                            &model,
+                                            "",
+                                            Some("stop".to_string()),
+                                        );
+                                        let mut final_json: serde_json::Value = serde_json::to_value(&final_chunk).unwrap();
+                                        final_json["usage"] = serde_json::json!({
+                                            "prompt_tokens": prompt_tokens,
+                                            "completion_tokens": completion_tokens,
+                                            "total_tokens": total_tokens,
+                                            "prompt_tokens_details": {"cached_tokens": 0}
+                                        });
+                                        Some((
+                                            Ok(format!(
+                                                "data: {}\n\ndata: [DONE]\n\n",
+                                                serde_json::to_string(&final_json).unwrap()
+                                            )),
+                                            (event_stream, is_done),
+                                        ))
+                                    } else {
+                                        let final_chunk = create_stream_chunk(
+                                            &id,
+                                            created,
+                                            &model,
+                                            "",
+                                            Some("stop".to_string()),
+                                        );
+                                        let final_chunk_json =
+                                            serde_json::to_string(&final_chunk).unwrap();
+                                        Some((
+                                            Ok(format!(
+                                                "data: {}\n\ndata: [DONE]\n\n",
+                                                final_chunk_json
+                                            )),
+                                            (event_stream, is_done),
+                                        ))
+                                    }
                                 }
                                 _ => {
                                     debug!("⏭️ 忽略其他事件類型");
@@ -440,10 +516,8 @@ async fn handle_stream_response(
                 },
             ))
         };
-
         res.stream(processed_stream);
     }
-
     let duration = start_time.elapsed();
     info!(
         "✅ 串流響應處理完成 | ID: {} | 耗時: {}",
@@ -451,22 +525,24 @@ async fn handle_stream_response(
         format_duration(duration)
     );
 }
-
 async fn handle_non_stream_response(
     res: &mut Response,
     mut event_stream: Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>,
     model: &str,
+    include_usage: bool,
+    prompt_tokens: u32,
+    completion_tokens_counter: Arc<AtomicU32>,
 ) {
     let start_time = Instant::now();
     let id = nanoid!(10);
-
-    info!("📦 開始處理非串流響應 | ID: {} | 模型: {}", id, model);
-
+    info!(
+        "📦 開始處理非串流響應 | ID: {} | 模型: {} | 包含使用統計: {}",
+        id, model, include_usage
+    );
     let mut replace_response = false;
     let mut full_content = String::new();
     let mut first_two_events = Vec::new();
     let mut accumulated_tool_calls: Vec<poe_api_process::types::ToolCall> = Vec::new();
-
     debug!("🔍 檢查初始事件");
     for _ in 0..2 {
         if let Some(Ok(event)) = event_stream.next().await {
@@ -474,14 +550,14 @@ async fn handle_non_stream_response(
             first_two_events.push(event);
         }
     }
-
     for event in first_two_events {
         match event.event {
             EventType::ReplaceResponse => {
                 debug!("🔄 檢測到 ReplaceResponse 模式");
                 replace_response = true;
                 if let Some(data) = event.data {
-                    full_content = data.text;
+                    let text_clone = data.text.clone();
+                    full_content = text_clone.clone();
                 }
             }
             EventType::Text => {
@@ -514,19 +590,35 @@ async fn handle_non_stream_response(
             }
         }
     }
-
     if replace_response {
         debug!("🔄 使用 ReplaceResponse 處理模式 (非串流)");
         // 將初始內容傳遞給 handle_replace_response
         let initial_content_for_handler = full_content.clone();
-        let content = handle_replace_response(event_stream, initial_content_for_handler).await;
+        let content = handle_replace_response(
+            event_stream,
+            initial_content_for_handler,
+            Arc::clone(&completion_tokens_counter),
+            include_usage,
+        )
+        .await;
         debug!(
             "📤 ReplaceResponse 最終內容長度 (非串流): {}",
             format_bytes_length(content.len())
-        ); // 區分日誌
-
-        // 在 ReplaceResponse 模式下，我們不處理工具調用
-        let response = ChatCompletionResponse {
+        );
+        let completion_tokens = if include_usage {
+            completion_tokens_counter.load(Ordering::SeqCst)
+        } else {
+            0
+        };
+        let total_tokens = prompt_tokens + completion_tokens;
+        if include_usage {
+            debug!(
+                "📊 Token 使用統計 | prompt_tokens: {} | completion_tokens: {} | total_tokens: {}",
+                prompt_tokens, completion_tokens, total_tokens
+            );
+        }
+        // 在 ReplaceResponse 模式下，不處理工具調用
+        let mut response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", nanoid!(10)),
             object: "chat.completion".to_string(),
             created: Utc::now().timestamp(),
@@ -535,7 +627,7 @@ async fn handle_non_stream_response(
                 index: 0,
                 message: CompletionMessage {
                     role: "assistant".to_string(),
-                    content,
+                    content, // Fixed: removed redundant field name
                     refusal: None,
                     tool_calls: None,
                 },
@@ -544,12 +636,18 @@ async fn handle_non_stream_response(
             }],
             usage: None,
         };
-
+        if include_usage {
+            response.usage = Some(serde_json::json!({
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "prompt_tokens_details": {"cached_tokens": 0}
+            }));
+        }
         res.render(Json(response));
     } else {
         debug!("🔄 使用標準非串流處理模式");
         let mut response_content = full_content;
-
         while let Some(Ok(event)) = event_stream.next().await {
             match event.event {
                 EventType::Text => {
@@ -582,22 +680,34 @@ async fn handle_non_stream_response(
                 }
             }
         }
-
+        let completion_tokens = if include_usage {
+            let tokens = count_completion_tokens(&response_content);
+            completion_tokens_counter.store(tokens, Ordering::SeqCst);
+            tokens
+        } else {
+            0
+        };
+        let total_tokens = prompt_tokens + completion_tokens;
         // 確定 finish_reason
         let finish_reason = if !accumulated_tool_calls.is_empty() {
             "tool_calls".to_string()
         } else {
             "stop".to_string()
         };
-
         debug!(
             "📤 準備發送回應 | 內容長度: {} | 工具調用數量: {} | 完成原因: {}",
             format_bytes_length(response_content.len()),
             accumulated_tool_calls.len(),
             finish_reason
         );
-
-        let response = ChatCompletionResponse {
+        if include_usage {
+            debug!(
+                "📊 Token 使用統計 | prompt_tokens: {} | completion_tokens: {} | total_tokens: {}",
+                prompt_tokens, completion_tokens, total_tokens
+            );
+        }
+        // 創建響應
+        let mut response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", id),
             object: "chat.completion".to_string(),
             created: Utc::now().timestamp(),
@@ -619,10 +729,16 @@ async fn handle_non_stream_response(
             }],
             usage: None,
         };
-
+        if include_usage {
+            response.usage = Some(serde_json::json!({
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "prompt_tokens_details": {"cached_tokens": 0}
+            }));
+        }
         res.render(Json(response));
     }
-
     let duration = start_time.elapsed();
     info!(
         "✅ 非串流響應處理完成 | ID: {} | 耗時: {}",
@@ -630,32 +746,28 @@ async fn handle_non_stream_response(
         format_duration(duration)
     );
 }
-
 async fn handle_replace_response(
     mut event_stream: Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>,
     initial_content: String,
+    completion_tokens_counter: Arc<AtomicU32>,
+    include_usage: bool,
 ) -> String {
     let start_time = Instant::now();
     debug!(
         "🔄 開始處理 ReplaceResponse | 初始內容長度: {}",
         format_bytes_length(initial_content.len())
-    ); // 更新日誌
-
+    );
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc;
-
     let (tx, mut rx) = mpsc::channel(1);
     // 使用傳入的 initial_content 初始化 last_content
     let last_content = Arc::new(Mutex::new(initial_content));
     let accumulated_text = Arc::new(Mutex::new(String::new()));
-
     let last_content_clone = Arc::clone(&last_content);
     let accumulated_text_clone = Arc::clone(&accumulated_text);
-
     tokio::spawn(async move {
         debug!("🏃 啟動背景事件收集任務");
         let mut done_received = false;
-
         while !done_received {
             match event_stream.next().await {
                 Some(Ok(event)) => match event.event {
@@ -697,14 +809,11 @@ async fn handle_replace_response(
         }
         debug!("👋 背景任務結束");
     });
-
     let _ = rx.recv().await;
-
     let final_content = {
         let replace_content = last_content.lock().unwrap();
         let text_content = accumulated_text.lock().unwrap();
-
-        if text_content.len() > replace_content.len() {
+        let content = if text_content.len() > replace_content.len() {
             debug!(
                 "📊 選擇累加文本內容 (較長) | 累加長度: {} | 替換長度: {}",
                 format_bytes_length(text_content.len()),
@@ -718,19 +827,28 @@ async fn handle_replace_response(
                 format_bytes_length(text_content.len())
             );
             replace_content.clone()
+        };
+        if include_usage {
+            let tokens = count_completion_tokens(&content);
+            completion_tokens_counter.store(tokens, Ordering::SeqCst);
+            debug!("📊 計算 completion_tokens: {}", tokens);
         }
+        content
     };
-
     let duration = start_time.elapsed();
     debug!(
         "✅ ReplaceResponse 處理完成 | 最終內容長度: {} | 耗時: {}",
         format_bytes_length(final_content.len()),
         format_duration(duration)
     );
-
+    if include_usage {
+        debug!(
+            "📊 Token 計數: {}",
+            completion_tokens_counter.load(Ordering::SeqCst)
+        );
+    }
     final_content
 }
-
 fn create_stream_chunk(
     id: &str,
     created: i64,
@@ -744,13 +862,11 @@ fn create_stream_chunk(
         refusal: None,
         tool_calls: None,
     };
-
     if content.is_empty() && finish_reason.is_none() {
         delta.role = Some("assistant".to_string());
     } else {
         delta.content = Some(content.to_string());
     }
-
     debug!(
         "🔧 創建串流片段 | ID: {} | 內容長度: {}",
         id,
@@ -760,7 +876,6 @@ fn create_stream_chunk(
             "0 B".to_string()
         }
     );
-
     ChatCompletionChunk {
         id: format!("chatcmpl-{}", id),
         object: "chat.completion.chunk".to_string(),

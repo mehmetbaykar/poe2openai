@@ -1,11 +1,13 @@
-use crate::types::{ContentItem,Config};
+use crate::types::{Config, ContentItem, Message};
 use quick_cache::sync::Cache;
 use std::path::Path;
-use std::sync::Arc;
-use tracing::{debug, error, info, warn};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tiktoken_rs::o200k_base;
+use tracing::{debug, error, info, warn};
 
-pub static CONFIG_CACHE: std::sync::OnceLock<Cache<String, Arc<Config>>> = std::sync::OnceLock::new();
+pub static CONFIG_CACHE: std::sync::OnceLock<Cache<String, Arc<Config>>> =
+    std::sync::OnceLock::new();
 
 pub fn format_bytes_length(bytes: usize) -> String {
     if bytes < 1024 {
@@ -127,4 +129,41 @@ pub async fn get_cached_config() -> Arc<Config> {
             })
         }
     }
+}
+
+/// 計算文本的 token 數量
+pub fn count_tokens(text: &str) -> u32 {
+    let bpe = match o200k_base() {
+        Ok(bpe) => bpe,
+        Err(e) => {
+            error!("❌ 無法初始化 BPE 編碼器: {}", e);
+            return 0;
+        }
+    };
+
+    let tokens = bpe.encode_with_special_tokens(text);
+    tokens.len() as u32
+}
+
+/// 計算消息列表的 token 數量
+pub fn count_message_tokens(messages: &[Message]) -> u32 {
+    let mut total_tokens = 0;
+
+    for message in messages {
+        // 每條消息的基本 token 數（角色標記等）
+        total_tokens += 4; // 每條消息的基本開銷
+
+        // 計算內容的 token 數
+        total_tokens += count_tokens(&message.content);
+    }
+
+    // 添加消息格式的額外 token
+    total_tokens += 2; // 消息格式的開始和結束標記
+
+    total_tokens
+}
+
+/// 計算完成內容的 token 數量
+pub fn count_completion_tokens(completion: &str) -> u32 {
+    count_tokens(completion)
 }

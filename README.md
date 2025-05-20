@@ -25,7 +25,7 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 - 💬 支援串流和非串流模式
 - 🔧 支援工具調用 (Tool Calls)
 - 🌐 對 POE API 的 Event 進行完整處理
-- 🤖 Cline/Roo Code 支持
+- 🤖 Cline/Roo Code 支持，包括 Token 用量統計
 - 📊 Web 管理介面(`/admin`)用於配置模型（模型映射 和 編輯`/models` 顯示的模型）
   - 啟用配置模型的功能會通過緩存`/models`的模型減少文件的讀取（`/admin`可自動刷新緩存）
 - 🐳 Docker 佈置支持
@@ -129,6 +129,7 @@ curl http://localhost:8080/v1/chat/completions \
 - `POST /chat/completions` - 與 POE 模型聊天（相容端點）
 
 ### 請求格式
+
 ```json
 {
   "model": "string",
@@ -142,6 +143,17 @@ curl http://localhost:8080/v1/chat/completions \
   "stream": false
 }
 ```
+#### 可選參數說明
+
+| 參數                | 類型     | 預設值       | 說明                                                 |
+|---------------------|----------|--------------|------------------------------------------------------|
+| model               | string   | (必填)       | 要請求的模型名稱                                    |
+| messages            | array    | (必填)       | 聊天訊息列表，陣列內須有 role 與 content             |
+| temperature         | float    | null          | 探索性(0~2)。控制回答的多樣性，數值越大越發散      |
+| stream              | bool     | false        | 是否串流回傳（SSE），true 開啟串流                    |
+| tools               | array    | null         | 工具描述 (Tool Calls) 支援（如 function calling）     |
+| stream_options      | object   | null         | 串流細部選項，目前支援 {"include_usage": bool}: 是否附帶用量統計|
+> 其他參數如 top_p、n、stop 等 OpenAI 參數暫不支援，提交會被忽略。
 
 ### 響應格式
 

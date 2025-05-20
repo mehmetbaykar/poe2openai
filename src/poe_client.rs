@@ -1,9 +1,9 @@
 use futures_util::Stream;
 use poe_api_process::{EventResponse, PoeClient, PoeError, ProtocolMessage, QueryRequest};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, error, info};
-use std::sync::Arc;
 
 use crate::{types::*, utils::get_cached_config};
 
@@ -74,7 +74,8 @@ pub async fn create_query_request(
     let config: Arc<Config> = get_cached_config().await;
 
     // 檢查模型是否需要 replace_response 處理
-    let should_replace_response = if let Some(model_config) = config.models.get(model) { // 使用快取的 config
+    let should_replace_response = if let Some(model_config) = config.models.get(model) {
+        // 使用快取的 config
         model_config.replace_response.unwrap_or(false)
     } else {
         false
