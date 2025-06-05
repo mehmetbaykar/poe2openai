@@ -1,14 +1,15 @@
+use crate::{types::*, utils::get_cached_config, utils::get_text_from_openai_content};
 use futures_util::Stream;
-use poe_api_process::{EventResponse, PoeClient, PoeError, ProtocolMessage, QueryRequest};
+use poe_api_process::types::Attachment;
+use poe_api_process::{ChatMessage, ChatRequest, ChatResponse, PoeClient, PoeError};
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{debug, error, info};
 
-use crate::{types::*, utils::get_cached_config};
-
 pub struct PoeClientWrapper {
-    client: PoeClient,
+    pub client: PoeClient, // 修改為公開，以便外部訪問
     _model: String,
 }
 
@@ -20,20 +21,17 @@ impl PoeClientWrapper {
             _model: model.to_string(),
         }
     }
-
     pub async fn stream_request(
         &self,
-        query_request: QueryRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<EventResponse, PoeError>> + Send>>, PoeError> {
+        chat_request: ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         let start_time = Instant::now();
         debug!(
             "📤 發送串流請求 | 訊息數量: {} | 溫度設置: {:?}",
-            query_request.query.len(),
-            query_request.temperature
+            chat_request.query.len(),
+            chat_request.temperature
         );
-
-        let result = self.client.stream_request(query_request).await;
-
+        let result = self.client.stream_request(chat_request).await;
         match &result {
             Ok(_) => {
                 let duration = start_time.elapsed();
@@ -51,28 +49,66 @@ impl PoeClientWrapper {
                 );
             }
         }
-
         result
     }
 }
 
-pub async fn create_query_request(
+// OpenAI 消息格式轉換為 Poe 消息格式的函數
+fn openai_message_to_poe(msg: &Message, role_override: Option<String>) -> ChatMessage {
+    let mut attachments: Vec<Attachment> = vec![];
+    let mut texts: Vec<String> = vec![];
+
+    match &msg.content {
+        OpenAiContent::Text(s) => {
+            texts.push(s.clone());
+        }
+        OpenAiContent::Multi(arr) => {
+            for item in arr {
+                match item {
+                    OpenAiContentItem::Text { text } => texts.push(text.clone()),
+                    OpenAiContentItem::ImageUrl { image_url } => {
+                        debug!("🖼️ 處理圖片 URL: {}", image_url.url);
+                        attachments.push(Attachment {
+                            url: image_url.url.clone(),
+                            content_type: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let role = role_override.unwrap_or_else(|| msg.role.clone());
+    ChatMessage {
+        role,
+        content: texts.join("\n"),
+        attachments: if !attachments.is_empty() {
+            debug!("📎 添加 {} 個附件到消息", attachments.len());
+            Some(attachments)
+        } else {
+            None
+        },
+        content_type: "text/markdown".to_string(),
+    }
+}
+
+pub async fn create_chat_request(
     model: &str,
     messages: Vec<Message>,
     temperature: Option<f32>,
-    tools: Option<Vec<poe_api_process::types::Tool>>,
-) -> QueryRequest {
+    tools: Option<Vec<poe_api_process::types::ChatTool>>,
+    logit_bias: Option<HashMap<String, f32>>,
+    stop: Option<Vec<String>>,
+) -> ChatRequest {
     debug!(
-        "📝 創建查詢請求 | 模型: {} | 訊息數量: {} | 溫度設置: {:?} | 工具數量: {:?}",
+        "📝 創建聊天請求 | 模型: {} | 訊息數量: {} | 溫度設置: {:?} | 工具數量: {:?}",
         model,
         messages.len(),
         temperature,
         tools.as_ref().map(|t| t.len())
     );
-
     // 從緩存獲取 models.yaml 配置
     let config: Arc<Config> = get_cached_config().await;
-
     // 檢查模型是否需要 replace_response 處理
     let should_replace_response = if let Some(model_config) = config.models.get(model) {
         // 使用快取的 config
@@ -80,69 +116,59 @@ pub async fn create_query_request(
     } else {
         false
     };
-
     debug!(
         "🔍 模型 {} 的 replace_response 設置: {}",
         model, should_replace_response
     );
-
     let query = messages
-        .clone()
-        .into_iter()
+        .iter()
         .map(|msg| {
             let original_role = &msg.role;
-            let role = match original_role.as_str() {
+            let role_override = match original_role.as_str() {
                 // 總是將 assistant 轉換為 bot
-                "assistant" => "bot",
+                "assistant" => Some("bot".to_string()),
                 // 總是將 developer 轉換為 user
-                "developer" => "user",
+                "developer" => Some("user".to_string()),
                 // 只有在 replace_response 為 true 時才轉換 system 為 user
-                "system" if should_replace_response => "user",
+                "system" if should_replace_response => Some("user".to_string()),
                 // 其他情況保持原樣
-                other => other,
-            }
-            .to_string();
-
+                _ => None,
+            };
+            // 將 OpenAI 消息轉換為 Poe 消息
+            let poe_message = openai_message_to_poe(msg, role_override);
+            // 紀錄轉換結果
             debug!(
-                "🔄 處理訊息 | 原始角色: {} | 轉換後角色: {} | 內容長度: {}",
+                "🔄 處理訊息 | 原始角色: {} | 轉換後角色: {} | 內容長度: {} | 附件數量: {}",
                 original_role,
-                role,
-                crate::utils::format_bytes_length(msg.content.len())
+                poe_message.role,
+                crate::utils::format_bytes_length(poe_message.content.len()),
+                poe_message.attachments.as_ref().map_or(0, |a| a.len())
             );
-
-            ProtocolMessage {
-                role,
-                content: msg.content,
-                content_type: "text/markdown".to_string(),
-            }
+            poe_message
         })
         .collect();
-
     // 處理工具結果消息
     let mut tool_results = None;
-
     // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult
     if messages.iter().any(|msg| msg.role == "tool") {
         let mut results = Vec::new();
-
         for msg in &messages {
             if msg.role == "tool" {
-                // 嘗試從內容中解析 tool_call_id
-                if let Some(tool_call_id) = extract_tool_call_id(&msg.content) {
+                // 從內容中提取文字部分
+                let content_text = get_text_from_openai_content(&msg.content);
+                if let Some(tool_call_id) = extract_tool_call_id(&content_text) {
                     debug!("🔧 處理工具結果 | tool_call_id: {}", tool_call_id);
-
-                    results.push(poe_api_process::types::ToolResult {
+                    results.push(poe_api_process::types::ChatToolResult {
                         role: "tool".to_string(),
                         tool_call_id,
-                        name: "unknown".to_string(), // Poe API 可能不需要具體的名稱
-                        content: msg.content.clone(),
+                        name: "unknown".to_string(),
+                        content: content_text,
                     });
                 } else {
                     debug!("⚠️ 無法從工具消息中提取 tool_call_id");
                 }
             }
         }
-
         if !results.is_empty() {
             tool_results = Some(results);
             debug!(
@@ -151,9 +177,8 @@ pub async fn create_query_request(
             );
         }
     }
-
-    QueryRequest {
-        version: "1".to_string(),
+    ChatRequest {
+        version: "1.1".to_string(),
         r#type: "query".to_string(),
         query,
         temperature,
@@ -163,6 +188,8 @@ pub async fn create_query_request(
         tools,
         tool_calls: None,
         tool_results,
+        logit_bias,
+        stop_sequences: stop,
     }
 }
 
@@ -174,7 +201,6 @@ fn extract_tool_call_id(content: &str) -> Option<String> {
             return Some(tool_call_id.to_string());
         }
     }
-
     // 嘗試使用簡單的文本解析
     if let Some(start) = content.find("tool_call_id") {
         if let Some(id_start) = content[start..].find('"') {
@@ -185,6 +211,5 @@ fn extract_tool_call_id(content: &str) -> Option<String> {
             }
         }
     }
-
     None
 }

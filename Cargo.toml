@@ -1,6 +1,6 @@
 [package]
 name = "poe2openai"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 publish = ["crates-io"]
 authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
@@ -10,10 +10,10 @@ license = "MIT"
 keywords = ["poeapi", "openai","ai"]
 
 [dependencies]
-poe_api_process = "0.1.6"
+poe_api_process = "0.2.1"
 tokio = { version = "1.45.0", features = ["full"] }
 futures-util = "0.3.31"
-salvo = { version = "0.78.0", features = ["basic-auth","size-limiter","serve-static","cors"] }
+salvo = { version = "0.79.0", features = ["basic-auth","size-limiter","serve-static","cors"] }
 serde = "1.0.219"
 serde_json = "1.0.140"
 chrono = "0.4.41"
@@ -22,5 +22,8 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 askama = "0.14.0"
 serde_yaml = "0.9.34"
-quick_cache = "0.6.13"
+quick_cache = "0.6.14"
 tiktoken-rs = "0.7.0"
+tempfile = "3.20.0"
+base64 = "0.22.1"
+regex = "1.11.1"

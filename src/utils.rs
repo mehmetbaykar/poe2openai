@@ -1,6 +1,12 @@
-use crate::types::{Config, ContentItem, Message};
+use crate::poe_client::PoeClientWrapper;
+use crate::types::{Config, ImageUrlContent, Message, OpenAiContent, OpenAiContentItem};
+use crate::types::{OpenAIError, OpenAIErrorResponse};
+use base64::prelude::*;
+use nanoid::nanoid;
+use poe_api_process::FileUploadRequest;
 use quick_cache::sync::Cache;
-use std::path::Path;
+use salvo::http::StatusCode;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tiktoken_rs::o200k_base;
@@ -8,6 +14,425 @@ use tracing::{debug, error, info, warn};
 
 pub static CONFIG_CACHE: std::sync::OnceLock<Cache<String, Arc<Config>>> =
     std::sync::OnceLock::new();
+
+// 處理消息中的文件/圖片
+pub async fn process_message_images(
+    poe_client: &PoeClientWrapper,
+    messages: &mut Vec<Message>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // 收集需要處理的URL
+    let mut external_urls = Vec::new();
+    let mut data_urls = Vec::new();
+    let mut url_indices = Vec::new();
+    let mut data_url_indices = Vec::new();
+    let mut temp_files: Vec<PathBuf> = Vec::new();
+    
+    // 收集消息中所有需要處理的URL
+    for (msg_idx, message) in messages.iter().enumerate() {
+        if let OpenAiContent::Multi(items) = &message.content {
+            for (item_idx, item) in items.iter().enumerate() {
+                if let OpenAiContentItem::ImageUrl { image_url } = item {
+                    if image_url.url.starts_with("data:") {
+                        // 處理data URL
+                        debug!("🔍 發現data URL");
+                        data_urls.push(image_url.url.clone());
+                        data_url_indices.push((msg_idx, item_idx));
+                    } else if !is_poe_cdn_url(&image_url.url) {
+                        // 處理需要上傳的外部URL
+                        debug!("🔍 發現需要上傳的外部URL: {}", image_url.url);
+                        external_urls.push(image_url.url.clone());
+                        url_indices.push((msg_idx, item_idx));
+                    }
+                }
+            }
+        }
+    }
+    
+    // 處理外部URL
+    if !external_urls.is_empty() {
+        debug!("🔄 準備上傳 {} 個外部URL到Poe", external_urls.len());
+        let upload_requests: Vec<FileUploadRequest> = external_urls
+            .iter()
+            .map(|url| FileUploadRequest::RemoteFile {
+                download_url: url.clone(),
+            })
+            .collect();
+        
+        match poe_client.client.upload_files_batch(upload_requests).await {
+            Ok(responses) => {
+                debug!("✅ 成功上傳 {} 個外部URL", responses.len());
+                // 更新原始消息中的URL
+                for ((msg_idx, item_idx), response) in url_indices.iter().zip(responses.iter()) {
+                    if let OpenAiContent::Multi(items) = &mut messages[*msg_idx].content {
+                        if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx] {
+                            debug!(
+                                "🔄 替換URL | 原始: {} | Poe: {}",
+                                image_url.url, response.attachment_url
+                            );
+                            image_url.url = response.attachment_url.clone();
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("❌ 上傳外部URL失敗: {}", e);
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("上傳外部URL失敗: {}", e),
+                )));
+            }
+        }
+    }
+    
+    // 處理data URL
+    if !data_urls.is_empty() {
+        debug!("🔄 準備處理 {} 個data URL", data_urls.len());
+        let mut upload_requests = Vec::new();
+        
+        // 將data URL轉換為臨時文件
+        for (_i, data_url) in data_urls.iter().enumerate() {
+            // 從 data URL 中提取 MIME 類型
+            let mime_type = if data_url.starts_with("data:") {
+                let parts: Vec<&str> = data_url.split(";base64,").collect();
+                if parts.len() >= 1 {
+                    let mime_part = parts[0].trim_start_matches("data:");
+                    debug!("🔍 提取的 MIME 類型: {}", mime_part);
+                    Some(mime_part.to_string())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            match handle_data_url_to_temp_file(data_url) {
+                Ok(file_path) => {
+                    debug!("📄 創建臨時文件成功: {}", file_path.display());
+                    upload_requests.push(FileUploadRequest::LocalFile {
+                        file: file_path.to_string_lossy().to_string(),
+                        mime_type,
+                    });
+                    temp_files.push(file_path);
+                }
+                Err(e) => {
+                    error!("❌ 處理data URL失敗: {}", e);
+                    // 清理已創建的臨時文件
+                    for path in &temp_files {
+                        if let Err(e) = fs::remove_file(path) {
+                            warn!("⚠️ 無法刪除臨時文件 {}: {}", path.display(), e);
+                        }
+                    }
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("處理data URL失敗: {}", e),
+                    )));
+                }
+            }
+        }
+        
+        // 上傳臨時文件
+        if !upload_requests.is_empty() {
+            match poe_client.client.upload_files_batch(upload_requests).await {
+                Ok(responses) => {
+                    debug!("✅ 成功上傳 {} 個臨時文件", responses.len());
+                    // 更新原始消息中的URL
+                    for ((msg_idx, item_idx), response) in
+                        data_url_indices.iter().zip(responses.iter())
+                    {
+                        if let OpenAiContent::Multi(items) = &mut messages[*msg_idx].content {
+                            if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx]
+                            {
+                                debug!("🔄 替換data URL | Poe: {}", response.attachment_url);
+                                image_url.url = response.attachment_url.clone();
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("❌ 上傳臨時文件失敗: {}", e);
+                    // 清理臨時文件
+                    for path in &temp_files {
+                        if let Err(e) = fs::remove_file(path) {
+                            warn!("⚠️ 無法刪除臨時文件 {}: {}", path.display(), e);
+                        }
+                    }
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("上傳臨時文件失敗: {}", e),
+                    )));
+                }
+            }
+        }
+        
+        // 清理臨時文件
+        for path in &temp_files {
+            if let Err(e) = fs::remove_file(path) {
+                warn!("⚠️ 無法刪除臨時文件 {}: {}", path.display(), e);
+            } else {
+                debug!("🗑️ 已刪除臨時文件: {}", path.display());
+            }
+        }
+    }
+    
+    // 處理AI回覆中的Poe CDN連結，將其添加到用戶消息的image_url中
+    if messages.len() >= 2 {
+        // 尋找最後一個AI回覆和用戶消息
+        let last_bot_idx = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, msg)| msg.role == "assistant")
+            .last()
+            .map(|(i, _)| i);
+        let last_user_idx = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, msg)| msg.role == "user")
+            .last()
+            .map(|(i, _)| i);
+        
+        if let (Some(bot_idx), Some(user_idx)) = (last_bot_idx, last_user_idx) {
+            // 提取AI回覆中的Poe CDN連結
+            let poe_cdn_urls = extract_poe_cdn_urls_from_message(&messages[bot_idx]);
+            if !poe_cdn_urls.is_empty() {
+                debug!(
+                    "🔄 從AI回覆中提取了 {} 個Poe CDN連結，添加到用戶消息",
+                    poe_cdn_urls.len()
+                );
+                // 將這些連結添加到用戶消息的image_url中
+                let user_msg = &mut messages[user_idx];
+                match &mut user_msg.content {
+                    OpenAiContent::Text(text) => {
+                        // 將文本消息轉換為多部分消息，加入圖片
+                        let mut items = Vec::new();
+                        items.push(OpenAiContentItem::Text { text: text.clone() });
+                        for url in poe_cdn_urls {
+                            items.push(OpenAiContentItem::ImageUrl {
+                                image_url: ImageUrlContent { url },
+                            });
+                        }
+                        user_msg.content = OpenAiContent::Multi(items);
+                    }
+                    OpenAiContent::Multi(items) => {
+                        // 已經是多部分消息，直接添加圖片
+                        for url in poe_cdn_urls {
+                            items.push(OpenAiContentItem::ImageUrl {
+                                image_url: ImageUrlContent { url },
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+// 從 OpenAIContent 獲取純文本內容
+pub fn get_text_from_openai_content(content: &OpenAiContent) -> String {
+    match content {
+        OpenAiContent::Text(s) => s.clone(),
+        OpenAiContent::Multi(items) => {
+            let mut text_parts = Vec::new();
+            for item in items {
+                if let OpenAiContentItem::Text { text } = item {
+                    // 使用 serde_json::to_string 處理文本中的特殊字符
+                    match serde_json::to_string(text) {
+                        Ok(processed_text) => {
+                            // 移除 serde_json::to_string 添加的開頭和結尾的引號
+                            let processed_text = processed_text.trim_matches('"').to_string();
+                            // 將 JSON 轉義的引號 (\") 替換為普通引號 (")
+                            let processed_text = processed_text.replace("\\\"", "\"");
+                            text_parts.push(processed_text);
+                        },
+                        Err(_) => {
+                            // 如果序列化失敗，使用原始文本
+                            text_parts.push(text.clone());
+                        }
+                    }
+                }
+            }
+            text_parts.join("\n")
+        }
+    }
+}
+
+// 檢查URL是否為Poe CDN連結
+pub fn is_poe_cdn_url(url: &str) -> bool {
+    url.starts_with("https://pfst.cf2.poecdn.net")
+}
+
+// 從消息中提取Poe CDN連結
+pub fn extract_poe_cdn_urls_from_message(message: &Message) -> Vec<String> {
+    let mut urls = Vec::new();
+    match &message.content {
+        OpenAiContent::Multi(items) => {
+            for item in items {
+                if let OpenAiContentItem::ImageUrl { image_url } = item {
+                    if is_poe_cdn_url(&image_url.url) {
+                        urls.push(image_url.url.clone());
+                    }
+                } else if let OpenAiContentItem::Text { text } = item {
+                    // 從文本中提取 Poe CDN URL
+                    extract_urls_from_markdown(text, &mut urls);
+                }
+            }
+        },
+        OpenAiContent::Text(text) => {
+            // 從純文本消息中提取 Poe CDN URL
+            extract_urls_from_markdown(text, &mut urls);
+        }
+    }
+    urls
+}
+
+// 從 Markdown 文本中提取 Poe CDN URL 的輔助函數
+fn extract_urls_from_markdown(text: &str, urls: &mut Vec<String>) {
+    // 提取 Markdown 圖片格式的 URL: ![alt](url)
+    let re_md_img = regex::Regex::new(r"!\[.*?\]\((https?://[^\s)]+)\)").unwrap();
+    for cap in re_md_img.captures_iter(text) {
+        if let Some(url) = cap.get(1) {
+            let url_str = url.as_str();
+            if is_poe_cdn_url(url_str) {
+                urls.push(url_str.to_string());
+            }
+        }
+    }
+    
+    // 同時處理直接出現的 URL
+    for word in text.split_whitespace() {
+        if is_poe_cdn_url(word) {
+            urls.push(word.to_string());
+        }
+    }
+}
+
+// 處理base64數據URL，將其存儲為臨時文件
+pub fn handle_data_url_to_temp_file(data_url: &str) -> Result<PathBuf, String> {
+    // 1. 驗證資料 URL 格式
+    if !data_url.starts_with("data:") {
+        return Err("無效的資料 URL 格式".to_string());
+    }
+
+    // 2. 分離 MIME 類型和 base64 資料
+    let parts: Vec<&str> = data_url.split(";base64,").collect();
+    if parts.len() != 2 {
+        return Err("無效的資料 URL 格式：缺少 base64 分隔符".to_string());
+    }
+
+    // 3. 提取 MIME 類型
+    let mime_type = parts[0].strip_prefix("data:").unwrap_or(parts[0]);
+    debug!("🔍 提取的 MIME 類型: {}", mime_type);
+
+    // 4. 根據 MIME 類型決定檔案擴充名
+    let file_ext = mime_type_to_extension(mime_type).unwrap_or("bin");
+    debug!("📄 使用檔案擴充名: {}", file_ext);
+
+    // 5. 解碼 base64 資料 (僅使用 BASE64_STANDARD)
+    let base64_data = parts[1];
+    debug!("🔢 Base64 資料長度: {}", base64_data.len());
+    
+    let decoded = match BASE64_STANDARD.decode(base64_data) {
+        Ok(data) => {
+            debug!("✅ Base64 解碼成功 | 資料大小: {} 位元組", data.len());
+            data
+        },
+        Err(e) => {
+            error!("❌ Base64 解碼失敗: {}", e);
+            return Err(format!("Base64 解碼失敗: {}", e));
+        }
+    };
+
+    // 6. 建立臨時檔案
+    let temp_dir = std::env::temp_dir();
+    let file_name = format!("poe2openai_{}.{}", nanoid!(16), file_ext);
+    let file_path = temp_dir.join(&file_name);
+    
+    // 7. 寫入資料到臨時檔案
+    match fs::write(&file_path, &decoded) {
+        Ok(_) => {
+            debug!("✅ 成功寫入臨時檔案: {}", file_path.display());
+            Ok(file_path)
+        },
+        Err(e) => {
+            error!("❌ 寫入臨時檔案失敗: {}", e);
+            Err(format!("寫入臨時檔案失敗: {}", e))
+        }
+    }
+}
+
+// 從MIME類型獲取文件擴展名
+fn mime_type_to_extension(mime_type: &str) -> Option<&str> {
+    match mime_type {
+        "image/jpeg" | "image/jpg" => Some("jpeg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/svg+xml" => Some("svg"),
+        "image/bmp" => Some("bmp"),
+        "image/tiff" => Some("tiff"),
+        "application/pdf" => Some("pdf"),
+        "text/plain" => Some("txt"),
+        "text/csv" => Some("csv"),
+        "application/json" => Some("json"),
+        "application/xml" | "text/xml" => Some("xml"),
+        "application/zip" => Some("zip"),
+        "application/x-tar" => Some("tar"),
+        "application/x-gzip" => Some("gz"),
+        "audio/mpeg" => Some("mp3"),
+        "audio/wav" => Some("wav"),
+        "audio/ogg" => Some("ogg"),
+        "video/mp4" => Some("mp4"),
+        "video/mpeg" => Some("mpeg"),
+        "video/quicktime" => Some("mov"),
+        _ => None,
+    }
+}
+
+pub fn convert_poe_error_to_openai(
+    error_text: &str,
+    allow_retry: bool,
+) -> (StatusCode, OpenAIErrorResponse) {
+    debug!(
+        "🔄 轉換錯誤響應 | 錯誤文本: {}, 允許重試: {}",
+        error_text, allow_retry
+    );
+    let (status, error_type, code) = if error_text.contains("Internal server error") {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "internal_error",
+        )
+    } else if error_text.contains("rate limit") {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limit_exceeded",
+            "rate_limit_exceeded",
+        )
+    } else if error_text.contains("Invalid token") || error_text.contains("Unauthorized") {
+        (StatusCode::UNAUTHORIZED, "invalid_auth", "invalid_api_key")
+    } else if error_text.contains("Bot does not exist") {
+        (StatusCode::NOT_FOUND, "model_not_found", "model_not_found")
+    } else {
+        (StatusCode::BAD_REQUEST, "invalid_request", "bad_request")
+    };
+    debug!(
+        "📋 錯誤轉換結果 | 狀態碼: {} | 錯誤類型: {}",
+        status.as_u16(),
+        error_type
+    );
+    (
+        status,
+        OpenAIErrorResponse {
+            error: OpenAIError {
+                message: error_text.to_string(),
+                r#type: error_type.to_string(),
+                code: code.to_string(),
+                param: None,
+            },
+        },
+    )
+}
 
 pub fn format_bytes_length(bytes: usize) -> String {
     if bytes < 1024 {
@@ -27,44 +452,6 @@ pub fn format_duration(duration: std::time::Duration) -> String {
     }
 }
 
-pub fn deserialize_content<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::{self, Visitor};
-    use std::fmt;
-    struct ContentVisitor;
-    impl<'de> Visitor<'de> for ContentVisitor {
-        type Value = String;
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("string or array of content items")
-        }
-        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            Ok(value.to_string())
-        }
-        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            Ok(value)
-        }
-        fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
-        where
-            S: de::SeqAccess<'de>,
-        {
-            let mut combined_text = String::new();
-            while let Some(item) = seq.next_element::<ContentItem>()? {
-                combined_text.push_str(&item.text);
-            }
-            Ok(combined_text)
-        }
-    }
-    deserializer.deserialize_any(ContentVisitor)
-}
-
 pub fn get_config_path(filename: &str) -> PathBuf {
     let config_dir = std::env::var("CONFIG_DIR").unwrap_or_else(|_| "./".to_string());
     let mut path = PathBuf::from(config_dir);
@@ -74,8 +461,7 @@ pub fn get_config_path(filename: &str) -> PathBuf {
 
 pub fn load_config_from_yaml() -> Result<Config, String> {
     let path_str = "models.yaml";
-    let path = Path::new(path_str);
-
+    let path = get_config_path(path_str);
     if path.exists() {
         match std::fs::read_to_string(path) {
             Ok(contents) => match serde_yaml::from_str::<Config>(&contents) {
@@ -108,13 +494,11 @@ pub async fn get_cached_config() -> Arc<Config> {
         info!("🚀 正在初始化 YAML 配置緩存...");
         Cache::<String, Arc<Config>>::new(2)
     });
-
     // 嘗試從緩存獲取，如果失敗則加載
     let config_result = cache_instance.get_or_insert_with("models.yaml", || {
         debug!("💾 YAML 配置緩存未命中，嘗試從 YAML 加載...");
         load_config_from_yaml().map(Arc::new)
     });
-
     match config_result {
         Ok(config_arc) => {
             debug!("✅ 成功從緩存中取回配置。");
@@ -140,7 +524,6 @@ pub fn count_tokens(text: &str) -> u32 {
             return 0;
         }
     };
-
     let tokens = bpe.encode_with_special_tokens(text);
     tokens.len() as u32
 }
@@ -148,18 +531,15 @@ pub fn count_tokens(text: &str) -> u32 {
 /// 計算消息列表的 token 數量
 pub fn count_message_tokens(messages: &[Message]) -> u32 {
     let mut total_tokens = 0;
-
     for message in messages {
         // 每條消息的基本 token 數（角色標記等）
         total_tokens += 4; // 每條消息的基本開銷
-
         // 計算內容的 token 數
-        total_tokens += count_tokens(&message.content);
+        let content_text = get_text_from_openai_content(&message.content);
+        total_tokens += count_tokens(&content_text);
     }
-
     // 添加消息格式的額外 token
     total_tokens += 2; // 消息格式的開始和結束標記
-
     total_tokens
 }
 

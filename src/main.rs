@@ -2,6 +2,9 @@ use salvo::prelude::*;
 use std::env;
 use std::path::Path;
 use tracing::{debug, info};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 mod handlers;
 mod poe_client;
 mod types;
@@ -26,7 +29,6 @@ fn setup_logging(log_level: &str) {
         .with_line_number(false)
         .with_env_filter(log_level)
         .init();
-
     info!("🚀 日誌系統初始化完成，日誌級別: {}", log_level);
 }
 
@@ -34,7 +36,24 @@ fn setup_logging(log_level: &str) {
 async fn main() {
     let log_level = get_env_or_default("LOG_LEVEL", "debug");
     setup_logging(&log_level);
-
+    
+    // 初始化全域速率限制
+    let _ = handlers::limit::GLOBAL_RATE_LIMITER.set(
+        Arc::new(tokio::sync::Mutex::new(Instant::now() - Duration::from_secs(60)))
+    );
+    
+    // 顯示速率限制設定
+    let rate_limit_ms = std::env::var("RATE_LIMIT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(100);
+        
+    if rate_limit_ms == 0 {
+        info!("⚙️ 全域速率限制: 已禁用 (RATE_LIMIT_MS=0)");
+    } else {
+        info!("⚙️ 全域速率限制: 已啟用 (每 {}ms 一次請求)", rate_limit_ms);
+    }
+    
     let host = get_env_or_default("HOST", "0.0.0.0");
     let port = get_env_or_default("PORT", "8080");
     get_env_or_default("ADMIN_USERNAME", "admin");
@@ -45,15 +64,13 @@ async fn main() {
     let salvo_max_size = get_env_or_default("MAX_REQUEST_SIZE", "1073741824")
         .parse()
         .unwrap_or(1024 * 1024 * 1024); // 預設 1GB
-
     let bind_address = format!("{}:{}", host, port);
-
     info!("🌟 正在啟動 Poe API To OpenAI API 服務...");
     debug!("📍 服務綁定地址: {}", bind_address);
-
+    
     // 使用新的自定義CORS中間件
     let api_router = Router::new()
-        .hoop(handlers::cors_middleware) // 使用我們自定義的CORS中間件
+        .hoop(handlers::cors_middleware)
         .push(
             Router::with_path("models")
                 .get(handlers::get_models)
@@ -61,6 +78,7 @@ async fn main() {
         )
         .push(
             Router::with_path("chat/completions")
+                .hoop(handlers::rate_limit_middleware)
                 .post(handlers::chat_completions)
                 .options(handlers::cors_middleware),
         )
@@ -76,20 +94,19 @@ async fn main() {
         )
         .push(
             Router::with_path("v1/chat/completions")
+                .hoop(handlers::rate_limit_middleware)
                 .post(handlers::chat_completions)
                 .options(handlers::cors_middleware),
         );
-
+    
     let router: Router = Router::new()
         .hoop(max_size(salvo_max_size.try_into().unwrap()))
         .push(Router::with_path("static/{**path}").get(StaticDir::new(["static"])))
         .push(handlers::admin_routes())
         .push(api_router);
-
+    
     info!("🛣️  API 路由配置完成");
-
     let acceptor = TcpListener::new(&bind_address).bind().await;
     info!("🎯 服務已啟動並監聽於 {}", bind_address);
-
     Server::new(acceptor).serve(router).await;
 }

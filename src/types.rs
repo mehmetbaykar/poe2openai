@@ -1,5 +1,6 @@
-use crate::utils::deserialize_content;
-use poe_api_process::types::{Tool, ToolCall};
+use std::collections::HashMap;
+
+use poe_api_process::types::{ChatTool, ChatToolCall};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -19,10 +20,15 @@ pub struct PromptTokensDetails {
 pub struct ChatCompletionRequest {
     pub model: String,
     pub messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logit_bias: Option<HashMap<String, f32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop: Option<Vec<String>>,
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<Tool>>,
+    pub tools: Option<Vec<ChatTool>>,
     pub stream_options: Option<StreamOptions>,
 }
 
@@ -31,16 +37,36 @@ pub struct StreamOptions {
     pub include_usage: Option<bool>,
 }
 
-#[derive(Deserialize, Serialize, Clone)]
-pub struct Message {
-    pub role: String,
-    #[serde(deserialize_with = "deserialize_content")]
-    pub content: String,
+// 定義支援 OpenAI content 格式的 enum (String 或陣列)
+#[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum OpenAiContent {
+    Text(String),
+    Multi(Vec<OpenAiContentItem>),
 }
 
-#[derive(Deserialize)]
-pub struct ContentItem {
-    pub text: String,
+// 定義 OpenAI content 陣列內的項目類型
+#[derive(Debug, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum OpenAiContentItem {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: ImageUrlContent },
+}
+
+// 定義 image_url 的內容結構
+#[derive(Debug, Deserialize, Clone)]
+pub struct ImageUrlContent {
+    pub url: String,
+    // 可擴展其他欄位如 detail 等
+}
+
+// 更新 Message 結構使用新的 OpenAiContent
+#[derive(Deserialize, Clone)]
+pub struct Message {
+    pub role: String,
+    pub content: OpenAiContent,
 }
 
 #[derive(Serialize)]
@@ -67,7 +93,7 @@ pub struct CompletionMessage {
     pub content: String,
     pub refusal: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
 
 #[derive(Serialize)]
@@ -92,7 +118,7 @@ pub struct Delta {
     pub content: Option<String>,
     pub refusal: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
+    pub tool_calls: Option<Vec<ChatToolCall>>,
 }
 
 #[derive(Serialize)]
