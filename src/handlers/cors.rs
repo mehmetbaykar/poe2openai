@@ -2,6 +2,47 @@ use salvo::http::{HeaderValue, Method, StatusCode, header};
 use salvo::prelude::*;
 use tracing::{debug, info};
 
+/// 检查头部是否安全
+fn is_safe_header(header: &str) -> bool {
+    let header_lower = header.trim().to_lowercase();
+    
+    // 排除空字符串
+    if header_lower.is_empty() {
+        return false;
+    }
+    
+    // 黑名單：明確的惡意頭部
+    if matches!(header_lower.as_str(), "cookie" | "set-cookie") {
+        return false;
+    }
+    
+    // 白名單：允許的頭部模式
+    // 1. X-開頭的自定義頭部（如X-Stainless-*）
+    // 2. 標準HTTP頭部
+    header_lower.starts_with("x-") || 
+    matches!(header_lower.as_str(), 
+        "accept" | "accept-encoding" | "accept-language" | 
+        "authorization" | "cache-control" | "connection" | 
+        "content-type" | "user-agent" | "referer" | "origin" |
+        "pragma" | "sec-fetch-dest" | "sec-fetch-mode" | "sec-fetch-site"
+    )
+}
+
+/// 解析客戶端請求的頭部並進行安全過濾
+fn parse_requested_headers(req: &Request) -> Vec<String> {
+    req.headers()
+        .get(header::ACCESS_CONTROL_REQUEST_HEADERS)
+        .and_then(|h| h.to_str().ok())
+        .map(|headers_str| {
+            headers_str
+                .split(',')
+                .map(|h| h.trim().to_string())
+                .filter(|h| !h.is_empty() && is_safe_header(h))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[handler]
 pub async fn cors_middleware(
     req: &mut Request,
@@ -63,18 +104,58 @@ fn handle_preflight_request(req: &Request, res: &mut Response) {
         HeaderValue::from_static("GET, POST, OPTIONS, PUT, DELETE, PATCH, HEAD"),
     );
 
-    res.headers_mut().insert(
-        header::ACCESS_CONTROL_ALLOW_HEADERS,
-        HeaderValue::from_static(
-            "\
-            Authorization, Content-Type, User-Agent, Accept, Origin, \
-            X-Requested-With, Access-Control-Request-Method, \
-            Access-Control-Request-Headers, Accept-Encoding, Accept-Language, \
-            Cache-Control, Connection, Referer, Sec-Fetch-Dest, Sec-Fetch-Mode, \
-            Sec-Fetch-Site, Pragma, X-Api-Key\
-        ",
-        ),
-    );
+    // 基礎硬編碼頭部（保持向後兼容）
+    let base_headers = vec![
+        "Authorization", "Content-Type", "User-Agent", "Accept", "Origin",
+        "X-Requested-With", "Access-Control-Request-Method", 
+        "Access-Control-Request-Headers", "Accept-Encoding", "Accept-Language",
+        "Cache-Control", "Connection", "Referer", "Sec-Fetch-Dest", "Sec-Fetch-Mode",
+        "Sec-Fetch-Site", "Pragma", "X-Api-Key"
+    ];
+
+    // 解析客戶端請求的動態頭部
+    let dynamic_headers = parse_requested_headers(req);
+    
+    // 合併基礎頭部和動態頭部
+    let mut all_headers = base_headers.clone();
+    for header in &dynamic_headers {
+        if !all_headers.iter().any(|h| h.to_lowercase() == header.to_lowercase()) {
+            all_headers.push(header);
+        }
+    }
+    
+    // 構建最終的頭部字符串
+    let headers_str = all_headers.join(", ");
+    
+    // 記錄調試信息
+    if !dynamic_headers.is_empty() {
+        info!("➕ 動態添加的頭部: {:?}", dynamic_headers);
+    }
+    info!("📋 最終允許的頭部: {}", headers_str);
+
+    // 設置 Access-Control-Allow-Headers
+    match HeaderValue::from_str(&headers_str) {
+        Ok(headers_value) => {
+            res.headers_mut().insert(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                headers_value,
+            );
+        }
+        Err(e) => {
+            // 降級處理：如果動態頭部有問題，使用基礎頭部
+            debug!("⚠️ 動態頭部設置失敗: {}, 使用基礎頭部", e);
+            res.headers_mut().insert(
+                header::ACCESS_CONTROL_ALLOW_HEADERS,
+                HeaderValue::from_static(
+                    "Authorization, Content-Type, User-Agent, Accept, Origin, \
+                    X-Requested-With, Access-Control-Request-Method, \
+                    Access-Control-Request-Headers, Accept-Encoding, Accept-Language, \
+                    Cache-Control, Connection, Referer, Sec-Fetch-Dest, Sec-Fetch-Mode, \
+                    Sec-Fetch-Site, Pragma, X-Api-Key"
+                ),
+            );
+        }
+    }
 
     res.headers_mut().insert(
         header::ACCESS_CONTROL_MAX_AGE,
