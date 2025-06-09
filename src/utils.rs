@@ -18,7 +18,7 @@ pub static CONFIG_CACHE: std::sync::OnceLock<Cache<String, Arc<Config>>> =
 // 處理消息中的文件/圖片
 pub async fn process_message_images(
     poe_client: &PoeClientWrapper,
-    messages: &mut Vec<Message>,
+    messages: &mut [Message],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 收集需要處理的URL
     let mut external_urls = Vec::new();
@@ -26,7 +26,7 @@ pub async fn process_message_images(
     let mut url_indices = Vec::new();
     let mut data_url_indices = Vec::new();
     let mut temp_files: Vec<PathBuf> = Vec::new();
-    
+
     // 收集消息中所有需要處理的URL
     for (msg_idx, message) in messages.iter().enumerate() {
         if let OpenAiContent::Multi(items) = &message.content {
@@ -47,7 +47,7 @@ pub async fn process_message_images(
             }
         }
     }
-    
+
     // 處理外部URL
     if !external_urls.is_empty() {
         debug!("🔄 準備上傳 {} 個外部URL到Poe", external_urls.len());
@@ -57,7 +57,7 @@ pub async fn process_message_images(
                 download_url: url.clone(),
             })
             .collect();
-        
+
         match poe_client.client.upload_files_batch(upload_requests).await {
             Ok(responses) => {
                 debug!("✅ 成功上傳 {} 個外部URL", responses.len());
@@ -83,18 +83,18 @@ pub async fn process_message_images(
             }
         }
     }
-    
+
     // 處理data URL
     if !data_urls.is_empty() {
         debug!("🔄 準備處理 {} 個data URL", data_urls.len());
         let mut upload_requests = Vec::new();
-        
+
         // 將data URL轉換為臨時文件
-        for (_i, data_url) in data_urls.iter().enumerate() {
+        for data_url in data_urls.iter() {
             // 從 data URL 中提取 MIME 類型
             let mime_type = if data_url.starts_with("data:") {
                 let parts: Vec<&str> = data_url.split(";base64,").collect();
-                if parts.len() >= 1 {
+                if !parts.is_empty() {
                     let mime_part = parts[0].trim_start_matches("data:");
                     debug!("🔍 提取的 MIME 類型: {}", mime_part);
                     Some(mime_part.to_string())
@@ -104,7 +104,7 @@ pub async fn process_message_images(
             } else {
                 None
             };
-            
+
             match handle_data_url_to_temp_file(data_url) {
                 Ok(file_path) => {
                     debug!("📄 創建臨時文件成功: {}", file_path.display());
@@ -129,7 +129,7 @@ pub async fn process_message_images(
                 }
             }
         }
-        
+
         // 上傳臨時文件
         if !upload_requests.is_empty() {
             match poe_client.client.upload_files_batch(upload_requests).await {
@@ -163,7 +163,7 @@ pub async fn process_message_images(
                 }
             }
         }
-        
+
         // 清理臨時文件
         for path in &temp_files {
             if let Err(e) = fs::remove_file(path) {
@@ -173,7 +173,7 @@ pub async fn process_message_images(
             }
         }
     }
-    
+
     // 處理AI回覆中的Poe CDN連結，將其添加到用戶消息的image_url中
     if messages.len() >= 2 {
         // 尋找最後一個AI回覆和用戶消息
@@ -189,7 +189,7 @@ pub async fn process_message_images(
             .filter(|(_, msg)| msg.role == "user")
             .last()
             .map(|(i, _)| i);
-        
+
         if let (Some(bot_idx), Some(user_idx)) = (last_bot_idx, last_user_idx) {
             // 提取AI回覆中的Poe CDN連結
             let poe_cdn_urls = extract_poe_cdn_urls_from_message(&messages[bot_idx]);
@@ -224,7 +224,7 @@ pub async fn process_message_images(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -244,7 +244,7 @@ pub fn get_text_from_openai_content(content: &OpenAiContent) -> String {
                             // 將 JSON 轉義的引號 (\") 替換為普通引號 (")
                             let processed_text = processed_text.replace("\\\"", "\"");
                             text_parts.push(processed_text);
-                        },
+                        }
                         Err(_) => {
                             // 如果序列化失敗，使用原始文本
                             text_parts.push(text.clone());
@@ -277,7 +277,7 @@ pub fn extract_poe_cdn_urls_from_message(message: &Message) -> Vec<String> {
                     extract_urls_from_markdown(text, &mut urls);
                 }
             }
-        },
+        }
         OpenAiContent::Text(text) => {
             // 從純文本消息中提取 Poe CDN URL
             extract_urls_from_markdown(text, &mut urls);
@@ -298,7 +298,7 @@ fn extract_urls_from_markdown(text: &str, urls: &mut Vec<String>) {
             }
         }
     }
-    
+
     // 同時處理直接出現的 URL
     for word in text.split_whitespace() {
         if is_poe_cdn_url(word) {
@@ -331,12 +331,12 @@ pub fn handle_data_url_to_temp_file(data_url: &str) -> Result<PathBuf, String> {
     // 5. 解碼 base64 資料 (僅使用 BASE64_STANDARD)
     let base64_data = parts[1];
     debug!("🔢 Base64 資料長度: {}", base64_data.len());
-    
+
     let decoded = match BASE64_STANDARD.decode(base64_data) {
         Ok(data) => {
             debug!("✅ Base64 解碼成功 | 資料大小: {} 位元組", data.len());
             data
-        },
+        }
         Err(e) => {
             error!("❌ Base64 解碼失敗: {}", e);
             return Err(format!("Base64 解碼失敗: {}", e));
@@ -347,13 +347,13 @@ pub fn handle_data_url_to_temp_file(data_url: &str) -> Result<PathBuf, String> {
     let temp_dir = std::env::temp_dir();
     let file_name = format!("poe2openai_{}.{}", nanoid!(16), file_ext);
     let file_path = temp_dir.join(&file_name);
-    
+
     // 7. 寫入資料到臨時檔案
     match fs::write(&file_path, &decoded) {
         Ok(_) => {
             debug!("✅ 成功寫入臨時檔案: {}", file_path.display());
             Ok(file_path)
-        },
+        }
         Err(e) => {
             error!("❌ 寫入臨時檔案失敗: {}", e);
             Err(format!("寫入臨時檔案失敗: {}", e))

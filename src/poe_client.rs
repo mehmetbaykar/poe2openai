@@ -67,7 +67,7 @@ fn openai_message_to_poe(msg: &Message, role_override: Option<String>) -> ChatMe
                 match item {
                     OpenAiContentItem::Text { text } => texts.push(text.clone()),
                     OpenAiContentItem::ImageUrl { image_url } => {
-                        debug!("🖼️ 處理圖片 URL: {}", image_url.url);
+                        debug!("🖼️  處理圖片 URL: {}", image_url.url);
                         attachments.push(Attachment {
                             url: image_url.url.clone(),
                             content_type: None,
