@@ -1,11 +1,12 @@
+use crate::cache::{remove_config_sled, save_config_sled};
 use crate::types::Config;
-use crate::utils::{CONFIG_CACHE, get_config_path};
+use crate::utils::get_config_path;
 use askama::Template;
 use salvo::basic_auth::{BasicAuth, BasicAuthValidator};
 use salvo::prelude::*;
 use serde_json::json;
 use std::fs;
-use tracing::{debug, info};
+use tracing::info;
 
 #[derive(Template)]
 #[template(path = "admin.html")]
@@ -33,6 +34,8 @@ async fn save_config(req: &mut Request, res: &mut Response) {
                 res.render(Json(json!({ "error": e.to_string() })));
             } else {
                 info!("✅ models.yaml 已成功儲存。");
+                // 同步寫入 sled 快取
+                let _ = save_config_sled("models.yaml", &config);
                 invalidate_config_cache();
                 res.render(Json(json!({ "status": "success" })));
             }
@@ -48,11 +51,21 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
     let config_path = get_config_path("models.yaml");
     if config_path.exists() {
         let contents = fs::read_to_string(config_path)?;
-        Ok(serde_yaml::from_str(&contents)?)
+        match serde_yaml::from_str::<Config>(&contents) {
+            Ok(mut config) => {
+                // 確保 custom_models 字段存在
+                if config.custom_models.is_none() {
+                    config.custom_models = Some(Vec::new());
+                }
+                Ok(config)
+            }
+            Err(e) => Err(Box::new(e)),
+        }
     } else {
         Ok(Config {
             enable: Some(false),
             models: std::collections::HashMap::new(),
+            custom_models: Some(Vec::new()), // 初始化為空陣列而非 None
         })
     }
 }
@@ -65,12 +78,8 @@ fn save_config_to_file(config: &Config) -> Result<(), Box<dyn std::error::Error>
 }
 
 fn invalidate_config_cache() {
-    if let Some(cache_instance) = CONFIG_CACHE.get() {
-        info!("🗑️ 清除 models.yaml 設定緩存...");
-        cache_instance.remove(&"models.yaml".to_string());
-    } else {
-        debug!("🤔 CONFIG_CACHE 尚未初始化，無需清除。");
-    }
+    info!("🗑️  清除 models.yaml 設定緩存...");
+    remove_config_sled("models.yaml");
 }
 
 pub struct AdminAuthValidator;

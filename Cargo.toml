@@ -1,6 +1,6 @@
 [package]
 name = "poe2openai"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2024"
 publish = ["crates-io"]
 authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
@@ -22,8 +22,9 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 askama = "0.14.0"
 serde_yaml = "0.9.34"
-quick_cache = "0.6.14"
 tiktoken-rs = "0.7.0"
 tempfile = "3.20.0"
 base64 = "0.22.1"
 regex = "1.11.1"
+sled = { version = "0.34.7", features = ["no_logs"] }
+sha2 = "0.10.9"

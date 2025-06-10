@@ -1,20 +1,6 @@
-use std::collections::HashMap;
-
 use poe_api_process::types::{ChatTool, ChatToolCall};
 use serde::{Deserialize, Serialize};
-
-#[derive(Serialize)]
-pub struct Usage {
-    pub prompt_tokens: u32,
-    pub completion_tokens: u32,
-    pub total_tokens: u32,
-    pub prompt_tokens_details: PromptTokensDetails,
-}
-
-#[derive(Serialize)]
-pub struct PromptTokensDetails {
-    pub cached_tokens: u32,
-}
+use std::collections::HashMap;
 
 #[derive(Deserialize)]
 pub struct ChatCompletionRequest {
@@ -121,12 +107,12 @@ pub struct Delta {
     pub tool_calls: Option<Vec<ChatToolCall>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 pub struct OpenAIErrorResponse {
     pub error: OpenAIError,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug)]
 pub struct OpenAIError {
     pub message: String,
     pub r#type: String,
@@ -138,6 +124,15 @@ pub struct OpenAIError {
 pub(crate) struct Config {
     pub(crate) enable: Option<bool>,
     pub(crate) models: std::collections::HashMap<String, ModelConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) custom_models: Option<Vec<CustomModel>>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct CustomModel {
+    pub(crate) id: String,
+    pub(crate) created: Option<i64>,
+    pub(crate) owned_by: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -148,4 +143,17 @@ pub(crate) struct ModelConfig {
     pub(crate) replace_response: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) enable: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CachedUrl {
+    pub poe_url: String,
+    pub size_bytes: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct UrlCache {
+    pub external_urls: HashMap<String, CachedUrl>,
+    pub base64_hashes: HashMap<String, CachedUrl>,
+    pub total_size_bytes: usize,
 }

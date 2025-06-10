@@ -30,6 +30,7 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 - 🤖 支持 Claude/Roo Code 解析，包括 Token 用量統計
 - 📊 Web 管理介面(`/admin`)用於配置模型（模型映射和編輯`/models`顯示的模型）
 - 🔒 支持速率限制控制，防止請求過於頻繁
+- 📦 內建 URL 和 Base64 圖片緩存系統，減少重複上傳
 - 🐳 Docker 佈置支持
 
 ## 🔧 安裝指南
@@ -79,6 +80,8 @@ services:
       - MAX_REQUEST_SIZE=1073741824
       - CONFIG_DIR=/data
       - RATE_LIMIT_MS=100
+      - URL_CACHE_TTL_SECONDS=259200
+      - URL_CACHE_SIZE_MB=100
     volumes:
       - /path/to/data:/data
 ```
@@ -222,6 +225,8 @@ curl http://localhost:8080/v1/chat/completions \
 - `LOG_LEVEL` - 日誌級別（默認：`info`，可選：`debug`, `info`, `warn`, `error`）
 - `CONFIG_DIR` - 配置文件目錄路徑（docker 環境中默認為：`/data`，本機環境中默認為：`./`）
 - `RATE_LIMIT_MS` - 全局速率限制（毫秒，默認：`100`，設置為 `0` 禁用）
+- `URL_CACHE_TTL_SECONDS` - Poe CDN URL緩存有效期（秒，默認：`259200`，3天）
+- `URL_CACHE_SIZE_MB` - Poe CDN URL緩存最大容量（MB，默認：`100`）
 
 ## ❓ 常見問題
 

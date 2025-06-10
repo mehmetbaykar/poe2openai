@@ -30,6 +30,7 @@ Poe2OpenAI is a proxy service that converts the POE API to OpenAI API format. It
 - 🤖 Support for Claude/Roo Code parsing, including token usage statistics
 - 📊 Web admin interface (`/admin`) for model configuration (model mapping and editing models displayed in `/models`)
 - 🔒 Rate limiting support to prevent excessive requests
+- 📦 Built-in URL and Base64 files caching system to reduce duplicate uploads
 - 🐳 Docker deployment support
 
 ## 🔧 Installation Guide
@@ -76,6 +77,8 @@ services:
       - MAX_REQUEST_SIZE=1073741824
       - CONFIG_DIR=/data
       - RATE_LIMIT_MS=100
+      - URL_CACHE_TTL_SECONDS=259200
+      - URL_CACHE_SIZE_MB=100
     volumes:
       - /path/to/data:/data
 ```
@@ -212,6 +215,8 @@ Server configuration via environment variables:
 - `LOG_LEVEL` - Log level (default: `info`, options: `debug`, `info`, `warn`, `error`)
 - `CONFIG_DIR` - Configuration file directory (default in Docker: `/data`, default locally: `./`)
 - `RATE_LIMIT_MS` - Global rate limit (milliseconds, default: `100`, set to `0` to disable)
+- `URL_CACHE_TTL_SECONDS` - Poe CDN URL cache expiration period (seconds, default: `259200`, 3 days)
+- `URL_CACHE_SIZE_MB` - Maximum Poe CDN URL cache capacity (MB, default: `100`)
 
 ## ❓ FAQ
 ### Q: How do I get a Poe API Token?

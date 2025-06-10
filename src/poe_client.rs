@@ -1,4 +1,4 @@
-use crate::{types::*, utils::get_cached_config, utils::get_text_from_openai_content};
+use crate::{cache::get_cached_config, types::*, utils::get_text_from_openai_content};
 use futures_util::Stream;
 use poe_api_process::types::Attachment;
 use poe_api_process::{ChatMessage, ChatRequest, ChatResponse, PoeClient, PoeError};

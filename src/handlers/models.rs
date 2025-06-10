@@ -1,3 +1,5 @@
+use crate::{cache::get_cached_config, types::*};
+use chrono::Utc;
 use poe_api_process::{ModelInfo, get_model_list};
 use salvo::prelude::*;
 use serde_json::json;
@@ -6,8 +8,6 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info};
-
-use crate::{types::*, utils::get_cached_config};
 
 // 注意：此緩存不適用於 /api/models 路徑
 static API_MODELS_CACHE: RwLock<Option<Arc<Vec<ModelInfo>>>> = RwLock::const_new(None);
@@ -183,6 +183,39 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                         created: api_model_ref.created,
                         owned_by: api_model_ref.owned_by.clone(),
                     });
+                }
+            }
+        }
+
+        // 處理自訂模型，將其添加到已處理的模型列表中
+        if let Some(custom_models) = &config.custom_models {
+            if !custom_models.is_empty() {
+                info!("📋 處理自訂模型 | 數量: {}", custom_models.len());
+                for custom_model in custom_models {
+                    let model_id = custom_model.id.to_lowercase();
+                    // 檢查該ID是否已存在於處理後的模型中
+                    if !processed_models_enabled.iter().any(|m| m.id == model_id) {
+                        // 檢查是否在 yaml_config_map 中配置了 enable: false
+                        if let Some(yaml_config) = yaml_config_map.get(&model_id) {
+                            if yaml_config.enable == Some(false) {
+                                debug!("❌ 排除自訂模型 (YAML 停用): {}", model_id);
+                                continue;
+                            }
+                        }
+
+                        debug!("➕ 添加自訂模型: {}", model_id);
+                        processed_models_enabled.push(ModelInfo {
+                            id: model_id,
+                            object: "model".to_string(),
+                            created: custom_model
+                                .created
+                                .unwrap_or_else(|| Utc::now().timestamp()),
+                            owned_by: custom_model
+                                .owned_by
+                                .clone()
+                                .unwrap_or_else(|| "poe".to_string()),
+                        });
+                    }
                 }
             }
         }
