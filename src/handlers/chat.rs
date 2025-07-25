@@ -6,6 +6,7 @@ use crate::utils::{
     convert_poe_error_to_openai, count_completion_tokens, count_message_tokens,
     format_bytes_length, format_duration, process_message_images,
 };
+use poe_api_process::ChatResponseData;
 use chrono::Utc;
 use futures_util::future::{self};
 use futures_util::stream::{self, Stream, StreamExt};
@@ -183,13 +184,45 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
         OutputGenerator::new(display_model.clone(), prompt_tokens, include_usage);
 
     match client.stream_request(chat_request_obj).await {
-        Ok(event_stream) => {
-            if stream {
-                // 處理串流響應
-                handle_stream_response(res, event_stream, output_generator).await;
+        Ok(mut event_stream) => {
+            let first_event = event_stream.next().await;
+ 
+            if let Some(Ok(ChatResponse { event: ChatEventType::Error, data: Some(ChatResponseData::Error { text, allow_retry }) })) = &first_event {
+                let insufficient_points_msg_1 = "This bot needs more points to answer your request.";
+                let insufficient_points_msg_2 = "You do not have enough points to message this bot.";
+ 
+                if text.contains(insufficient_points_msg_1) || text.contains(insufficient_points_msg_2) {
+                    info!("🚫 偵測到 Poe 點數不足錯誤，返回 429 狀態碼。");
+                    let status = StatusCode::TOO_MANY_REQUESTS;
+                    let body = OpenAIErrorResponse {
+                        error: OpenAIError {
+                            message: "You have exceeded your message quota for this model. Please try again later.".to_string(),
+                            r#type: "insufficient_quota".to_string(),
+                            code: "insufficient_quota".to_string(),
+                            param: None,
+                        },
+                    };
+                    res.status_code(status);
+                    res.render(Json(body));
+                    return;
+                } else {
+                    let (status, body) = convert_poe_error_to_openai(text, *allow_retry);
+                    res.status_code(status);
+                    res.render(Json(body));
+                    return;
+                }
+            }
+ 
+            let reconstituted_stream: Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>> = if let Some(first) = first_event {
+                Box::pin(stream::once(async { first }).chain(event_stream))
             } else {
-                // 處理非串流響應
-                handle_non_stream_response(res, event_stream, output_generator).await;
+                Box::pin(stream::empty())
+            };
+ 
+            if stream {
+                handle_stream_response(res, reconstituted_stream, output_generator).await;
+            } else {
+                handle_non_stream_response(res, reconstituted_stream, output_generator).await;
             }
         }
         Err(e) => {

@@ -12,6 +12,9 @@ mod poe_client;
 mod types;
 mod utils;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn get_env_or_default(key: &str, default: &str) -> String {
     let value = env::var(key).unwrap_or_else(|_| default.to_string());
     if key == "ADMIN_PASSWORD" {
