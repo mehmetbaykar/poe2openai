@@ -80,6 +80,8 @@ pub struct CompletionMessage {
     pub refusal: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -105,6 +107,8 @@ pub struct Delta {
     pub refusal: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -143,17 +147,4 @@ pub(crate) struct ModelConfig {
     pub(crate) replace_response: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) enable: Option<bool>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CachedUrl {
-    pub poe_url: String,
-    pub size_bytes: usize,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct UrlCache {
-    pub external_urls: HashMap<String, CachedUrl>,
-    pub base64_hashes: HashMap<String, CachedUrl>,
-    pub total_size_bytes: usize,
 }

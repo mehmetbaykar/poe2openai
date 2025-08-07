@@ -29,6 +29,7 @@ Poe2OpenAI 是一个将 POE API 转换为 OpenAI API 格式的代理服务。让
 - 📊 Web 管理界面(`/admin`)用于配置模型（模型映射和编辑`/models`显示的模型）
 - 🔒 支持速率限制控制，防止请求过于频繁
 - 📦 内置 URL 和 Base64 图片缓存系统，减少重复上载
+- 🧠 基于 Deepseek OpenAI 格式，把 `Thinking...` 的推理思考内容放到`reasoning_content`中
 - 🐳 Docker 部署支持
 
 ## 🔧 安装指南

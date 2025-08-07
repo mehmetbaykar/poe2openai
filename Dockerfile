@@ -62,9 +62,6 @@ RUN apt-get update && \
     && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone
 
-# 建立非 root 使用者
-RUN groupadd -r poe && useradd -r -g poe poe
-
 # 建立應用程式目錄
 WORKDIR /app
 
@@ -73,17 +70,11 @@ COPY --from=builder /usr/src/app/target/release/poe2openai /app/
 COPY --from=builder /usr/src/app/templates /app/templates
 COPY --from=builder /usr/src/app/static /app/static
 
-# 創建數據目錄並設置權限
-RUN mkdir -p /data && chown poe:poe /data && chmod 775 /data
-
-# 設定檔案權限
-RUN chown -R poe:poe /app
+# 創建數據目錄
+RUN mkdir -p /data && chmod 777 /data
 
 # 定義volume掛載點
 VOLUME ["/data"]
-
-# 切換到非 root 使用者
-USER poe
 
 # 設定容器啟動指令
 ENTRYPOINT ["/app/poe2openai"]
@@ -94,4 +85,4 @@ EXPOSE ${PORT}
 # 設定標籤
 LABEL maintainer="Jerome Leong <jeromeleong1998@gmail.com>" \
     description="Poe API to OpenAI API 轉換服務" \
-    version="0.5.1"
+    version="0.5.2"

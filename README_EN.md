@@ -31,6 +31,7 @@ Poe2OpenAI is a proxy service that converts the POE API to OpenAI API format. It
 - 📊 Web admin interface (`/admin`) for model configuration (model mapping and editing models displayed in `/models`)
 - 🔒 Rate limiting support to prevent excessive requests
 - 📦 Built-in URL and Base64 files caching system to reduce duplicate uploads
+- Based on Deepseek OpenAI format, put the `Thinking...` content into `reasoning_content`
 - 🐳 Docker deployment support
 
 ## 🔧 Installation Guide

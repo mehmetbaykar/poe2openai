@@ -6,11 +6,11 @@ use crate::utils::{
     convert_poe_error_to_openai, count_completion_tokens, count_message_tokens,
     format_bytes_length, format_duration, process_message_images,
 };
-use poe_api_process::ChatResponseData;
 use chrono::Utc;
 use futures_util::future::{self};
 use futures_util::stream::{self, Stream, StreamExt};
 use nanoid::nanoid;
+use poe_api_process::ChatResponseData;
 use poe_api_process::{ChatEventType, ChatResponse, PoeError};
 use salvo::http::header;
 use salvo::prelude::*;
@@ -186,12 +186,20 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     match client.stream_request(chat_request_obj).await {
         Ok(mut event_stream) => {
             let first_event = event_stream.next().await;
- 
-            if let Some(Ok(ChatResponse { event: ChatEventType::Error, data: Some(ChatResponseData::Error { text, allow_retry }) })) = &first_event {
-                let insufficient_points_msg_1 = "This bot needs more points to answer your request.";
-                let insufficient_points_msg_2 = "You do not have enough points to message this bot.";
- 
-                if text.contains(insufficient_points_msg_1) || text.contains(insufficient_points_msg_2) {
+
+            if let Some(Ok(ChatResponse {
+                event: ChatEventType::Error,
+                data: Some(ChatResponseData::Error { text, allow_retry }),
+            })) = &first_event
+            {
+                let insufficient_points_msg_1 =
+                    "This bot needs more points to answer your request.";
+                let insufficient_points_msg_2 =
+                    "You do not have enough points to message this bot.";
+
+                if text.contains(insufficient_points_msg_1)
+                    || text.contains(insufficient_points_msg_2)
+                {
                     info!("🚫 偵測到 Poe 點數不足錯誤，返回 429 狀態碼。");
                     let status = StatusCode::TOO_MANY_REQUESTS;
                     let body = OpenAIErrorResponse {
@@ -212,13 +220,15 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
                     return;
                 }
             }
- 
-            let reconstituted_stream: Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>> = if let Some(first) = first_event {
+
+            let reconstituted_stream: Pin<
+                Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>,
+            > = if let Some(first) = first_event {
                 Box::pin(stream::once(async { first }).chain(event_stream))
             } else {
                 Box::pin(stream::empty())
             };
- 
+
             if stream {
                 handle_stream_response(res, reconstituted_stream, output_generator).await;
             } else {
@@ -399,12 +409,14 @@ impl OutputGenerator {
     }
 
     // 創建角色 chunk
+    // 創建角色 chunk
     fn create_role_chunk(&self) -> ChatCompletionChunk {
         let role_delta = Delta {
             role: Some("assistant".to_string()),
             content: None,
             refusal: None,
             tool_calls: None,
+            reasoning_content: None,
         };
         ChatCompletionChunk {
             id: format!("chatcmpl-{}", self.id),
@@ -419,6 +431,27 @@ impl OutputGenerator {
         }
     }
 
+    // 思考 chunk
+    fn create_reasoning_chunk(&self, reasoning_content: &str) -> ChatCompletionChunk {
+        let reasoning_delta = Delta {
+            role: None,
+            content: None,
+            refusal: None,
+            tool_calls: None,
+            reasoning_content: Some(reasoning_content.to_string()),
+        };
+        ChatCompletionChunk {
+            id: format!("chatcmpl-{}", self.id),
+            object: "chat.completion.chunk".to_string(),
+            created: self.created,
+            model: self.model.clone(),
+            choices: vec![Choice {
+                index: 0,
+                delta: reasoning_delta,
+                finish_reason: None,
+            }],
+        }
+    }
     // 創建串流 chunk
     fn create_stream_chunk(
         &self,
@@ -430,6 +463,7 @@ impl OutputGenerator {
             content: None,
             refusal: None,
             tool_calls: None,
+            reasoning_content: None,
         };
         delta.content = Some(content.to_string());
         debug!(
@@ -460,6 +494,7 @@ impl OutputGenerator {
             content: None,
             refusal: None,
             tool_calls: Some(tool_calls.to_vec()),
+            reasoning_content: None,
         };
         ChatCompletionChunk {
             id: format!("chatcmpl-{}", self.id),
@@ -476,32 +511,43 @@ impl OutputGenerator {
 
     // 創建最終完整回應（非串流模式）
     fn create_final_response(&self, ctx: &mut EventContext) -> ChatCompletionResponse {
+        // 處理剩餘的 pending_text
+        if !ctx.pending_text.trim().is_empty() {
+            use crate::evert::ThinkingProcessor;
+            let (reasoning_output, content_output) = ThinkingProcessor::process_text_chunk(ctx, "");
+            if let Some(final_reasoning) = reasoning_output {
+                ctx.reasoning_content.push_str(&final_reasoning);
+            }
+            if let Some(final_content) = content_output {
+                ctx.content.push_str(&final_content);
+            }
+        }
+
         // 處理內容，包括文件引用替換
         let content = if let Some(replace_content) = &ctx.replace_buffer {
             self.process_file_references(replace_content, &ctx.file_refs)
         } else {
             self.process_file_references(&ctx.content, &ctx.file_refs)
         };
+
         // 計算 token
         let (prompt_tokens, completion_tokens, total_tokens) = self.calculate_tokens(ctx);
+
         // 確定 finish_reason
         let finish_reason = if !ctx.tool_calls.is_empty() {
             "tool_calls".to_string()
         } else {
             "stop".to_string()
         };
+
         debug!(
-            "📤 準備發送回應 | 內容長度: {} | 工具調用數量: {} | 完成原因: {}",
+            "📤 準備發送回應 | 內容長度: {} | 思考長度: {} | 工具調用數量: {} | 完成原因: {}",
             format_bytes_length(content.len()),
+            format_bytes_length(ctx.reasoning_content.len()),
             ctx.tool_calls.len(),
             finish_reason
         );
-        if self.include_usage {
-            debug!(
-                "📊 Token 使用統計 | prompt_tokens: {} | completion_tokens: {} | total_tokens: {}",
-                prompt_tokens, completion_tokens, total_tokens
-            );
-        }
+
         // 創建響應
         let mut response = ChatCompletionResponse {
             id: format!("chatcmpl-{}", self.id),
@@ -519,12 +565,18 @@ impl OutputGenerator {
                     } else {
                         Some(ctx.tool_calls.clone())
                     },
+                    reasoning_content: if ctx.reasoning_content.trim().is_empty() {
+                        None
+                    } else {
+                        Some(ctx.reasoning_content.clone())
+                    },
                 },
                 logprobs: None,
                 finish_reason: Some(finish_reason),
             }],
             usage: None,
         };
+
         if self.include_usage {
             response.usage = Some(serde_json::json!({
                 "prompt_tokens": prompt_tokens,
@@ -533,6 +585,7 @@ impl OutputGenerator {
                 "prompt_tokens_details": {"cached_tokens": 0}
             }));
         }
+
         response
     }
 
@@ -590,33 +643,99 @@ impl OutputGenerator {
                                     ChatEventType::Text => {
                                         if let Some(chunk_content) = chunk_content_opt {
                                             debug!("📝 處理普通 Text 事件");
-                                            let processed = generator.process_file_references(
-                                                &chunk_content,
-                                                &ctx_guard.file_refs,
-                                            );
 
-                                            // 判斷是否需要發送角色塊
-                                            if !ctx_guard.role_chunk_sent {
-                                                let role_chunk = generator.create_role_chunk();
-                                                let role_json =
-                                                    serde_json::to_string(&role_chunk).unwrap();
-                                                ctx_guard.role_chunk_sent = true;
+                                            // 檢查是否是思考內容檢測標記
+                                            if chunk_content == "__REASONING_DETECTED__" {
+                                                debug!("🧠 檢測到思考內容，準備發送思考片段");
 
-                                                let content_chunk =
-                                                    generator.create_stream_chunk(&processed, None);
-                                                let content_json =
-                                                    serde_json::to_string(&content_chunk).unwrap();
+                                                // 獲取最新的思考內容（從上次發送後的新增部分）
+                                                let current_reasoning_len =
+                                                    ctx_guard.reasoning_content.len();
+                                                let last_sent_reasoning_len = ctx_guard
+                                                    .get("last_sent_reasoning_len")
+                                                    .unwrap_or(0);
 
-                                                output_content = Some(format!(
-                                                    "data: {}\n\ndata: {}\n\n",
-                                                    role_json, content_json
-                                                ));
+                                                if current_reasoning_len > last_sent_reasoning_len {
+                                                    let new_reasoning = ctx_guard.reasoning_content
+                                                        [last_sent_reasoning_len..]
+                                                        .to_string();
+
+                                                    if !new_reasoning.trim().is_empty() {
+                                                        // 更新已發送的思考內容長度
+                                                        ctx_guard.insert(
+                                                            "last_sent_reasoning_len",
+                                                            current_reasoning_len,
+                                                        );
+
+                                                        // 發送角色塊（如果還沒發送）
+                                                        let mut output_parts = Vec::new();
+
+                                                        if !ctx_guard.role_chunk_sent {
+                                                            let role_chunk =
+                                                                generator.create_role_chunk();
+                                                            let role_json =
+                                                                serde_json::to_string(&role_chunk)
+                                                                    .unwrap();
+                                                            output_parts.push(format!(
+                                                                "data: {}",
+                                                                role_json
+                                                            ));
+                                                            ctx_guard.role_chunk_sent = true;
+                                                        }
+
+                                                        // 發送思考內容
+                                                        let reasoning_chunk = generator
+                                                            .create_reasoning_chunk(&new_reasoning);
+                                                        let reasoning_json =
+                                                            serde_json::to_string(&reasoning_chunk)
+                                                                .unwrap();
+                                                        output_parts.push(format!(
+                                                            "data: {}",
+                                                            reasoning_json
+                                                        ));
+
+                                                        let output =
+                                                            output_parts.join("\n\n") + "\n\n";
+                                                        debug!(
+                                                            "🧠 發送思考片段 | 長度: {}",
+                                                            format_bytes_length(output.len())
+                                                        );
+
+                                                        output_content = Some(output);
+                                                    }
+                                                }
                                             } else {
-                                                let chunk =
-                                                    generator.create_stream_chunk(&processed, None);
-                                                let json = serde_json::to_string(&chunk).unwrap();
-                                                output_content =
-                                                    Some(format!("data: {}\n\n", json));
+                                                // 正常內容處理
+                                                let processed = generator.process_file_references(
+                                                    &chunk_content,
+                                                    &ctx_guard.file_refs,
+                                                );
+
+                                                // 判斷是否需要發送角色塊
+                                                if !ctx_guard.role_chunk_sent {
+                                                    let role_chunk = generator.create_role_chunk();
+                                                    let role_json =
+                                                        serde_json::to_string(&role_chunk).unwrap();
+                                                    ctx_guard.role_chunk_sent = true;
+
+                                                    let content_chunk = generator
+                                                        .create_stream_chunk(&processed, None);
+                                                    let content_json =
+                                                        serde_json::to_string(&content_chunk)
+                                                            .unwrap();
+
+                                                    output_content = Some(format!(
+                                                        "data: {}\n\ndata: {}\n\n",
+                                                        role_json, content_json
+                                                    ));
+                                                } else {
+                                                    let chunk = generator
+                                                        .create_stream_chunk(&processed, None);
+                                                    let json =
+                                                        serde_json::to_string(&chunk).unwrap();
+                                                    output_content =
+                                                        Some(format!("data: {}\n\n", json));
+                                                }
                                             }
                                         }
                                     }
