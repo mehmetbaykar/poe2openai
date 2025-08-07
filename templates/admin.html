@@ -114,6 +114,10 @@
 							<option value="replace">替換回應模型</option>
 							<option value="disabled">已停用模型</option>
 						</select>
+						<button id="groupToggle" class="inline-flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors duration-200">
+							<i class="fas fa-layer-group mr-2"></i>
+							<span id="groupToggleText">啟用分組</span>
+						</button>
 					</div>
 				</div>
 			</div>
@@ -366,6 +370,7 @@
             let itemsPerPage = 60;
             let currentFilter = "all";
             let searchTerm = "";
+            let groupingEnabled = localStorage.getItem("groupingEnabled") === "true";
             // Initialize the page
             document.addEventListener("DOMContentLoaded", () => {
               // 等待DOM完全加載後執行
@@ -384,6 +389,11 @@
                   closeModals();
                 });
               });
+              // Setup group toggle
+              const groupToggle = document.getElementById("groupToggle");
+              groupToggle.addEventListener("click", toggleGrouping);
+              updateGroupToggleState();
+              
               // Setup search and filter
               document
                 .getElementById("modelSearchInput")
@@ -427,6 +437,30 @@
               hideDisabled = e.target.checked;
               localStorage.setItem("hideDisabled", hideDisabled);
               filterModels();
+            }
+            
+            // Toggle grouping
+            function toggleGrouping() {
+              groupingEnabled = !groupingEnabled;
+              localStorage.setItem("groupingEnabled", groupingEnabled);
+              updateGroupToggleState();
+              filterModels();
+            }
+            
+            // Update group toggle button state
+            function updateGroupToggleState() {
+              const groupToggle = document.getElementById("groupToggle");
+              const groupToggleText = document.getElementById("groupToggleText");
+              
+              if (groupingEnabled) {
+                groupToggle.classList.remove("bg-gray-200", "dark:bg-gray-700");
+                groupToggle.classList.add("bg-primary", "dark:bg-primary-dark", "text-white");
+                groupToggleText.textContent = "停用分組";
+              } else {
+                groupToggle.classList.remove("bg-primary", "dark:bg-primary-dark", "text-white");
+                groupToggle.classList.add("bg-gray-200", "dark:bg-gray-700");
+                groupToggleText.textContent = "啟用分組";
+              }
             }
             // Close all modals
             function closeModals() {
@@ -538,10 +572,71 @@
                 if (hideDisabled) {
                   filteredModels = filteredModels.filter((model) => model.state !== "X");
                 }
+                
+                // Group by prefix and sort alphabetically (use mapped name if available, otherwise original name)
+                const groupedModels = {};
+                filteredModels.forEach((model) => {
+                  // Use mapped name for prefix extraction if available, otherwise use original name
+                  const modelConfig = configData.models[model.name] || {};
+                  const nameForGrouping = modelConfig.mapping || model.name;
+                  const prefix = extractModelPrefix(nameForGrouping);
+                  if (!groupedModels[prefix]) {
+                    groupedModels[prefix] = [];
+                  }
+                  groupedModels[prefix].push(model);
+                });
+                
+                // Move single-model groups to "其他" category
+                const finalGroupedModels = {};
+                const othersGroup = [];
+                
+                Object.keys(groupedModels).forEach((prefix) => {
+                  if (groupedModels[prefix].length === 1) {
+                    // Add single models to "others" group
+                    othersGroup.push(...groupedModels[prefix]);
+                  } else {
+                    // Keep groups with multiple models
+                    finalGroupedModels[prefix] = groupedModels[prefix];
+                  }
+                });
+                
+                // Add "其他" group if there are single models
+                if (othersGroup.length > 0) {
+                  finalGroupedModels['其他'] = othersGroup;
+                }
+                
+                // Sort each group alphabetically
+                Object.keys(finalGroupedModels).forEach((prefix) => {
+                  finalGroupedModels[prefix].sort((a, b) => a.name.localeCompare(b.name));
+                });
+                
+                // Sort prefixes alphabetically (put "其他" at the end)
+                const sortedPrefixes = Object.keys(finalGroupedModels).sort((a, b) => {
+                  if (a === '其他') return 1;
+                  if (b === '其他') return -1;
+                  return a.localeCompare(b);
+                });
+                
+                // Flatten models in sorted order
+                filteredModels = [];
+                sortedPrefixes.forEach((prefix) => {
+                  filteredModels.push(...finalGroupedModels[prefix]);
+                });
+                
                 // Update stats
                 updateModelStats();
-                // Render filtered models
-                renderModelCards();
+                
+                // Render models based on grouping preference
+                if (groupingEnabled) {
+                  // Render filtered models with grouping
+                  renderModelCardsWithGrouping(finalGroupedModels, sortedPrefixes);
+                } else {
+                  // Sort all models alphabetically without grouping
+                  filteredModels.sort((a, b) => a.name.localeCompare(b.name));
+                  // Render filtered models without grouping
+                  renderModelCards();
+                }
+                
                 // 隱藏載入指示器
                 showLoadingState(false);
               }, 5); // 小延遲，讓UI有時間響應
@@ -559,6 +654,13 @@
                 loadingIndicator.classList.add("hidden");
               }
             }
+            // Extract prefix from model name for grouping
+            function extractModelPrefix(modelName) {
+              // Split by hyphen, underscore, or colon and take the first part
+              const parts = modelName.split(/[-_:]/);
+              return parts[0].toLowerCase();
+            }
+
             // Check if a model is custom
             function isCustomModel(modelName) {
               return (
@@ -607,7 +709,186 @@
               }
               filterModels();
             }
-            // Render model cards with pagination
+            // Render model cards with grouping by prefix
+            function renderModelCardsWithGrouping(groupedModels, sortedPrefixes) {
+              const grid = document.getElementById("modelsGrid");
+              grid.innerHTML = "";
+              const noResultsMessage = document.getElementById("noResultsMessage");
+              
+              if (filteredModels.length === 0) {
+                noResultsMessage.classList.remove("hidden");
+                return;
+              }
+              
+              noResultsMessage.classList.add("hidden");
+              
+              // Calculate pagination
+              const totalPages = Math.ceil(filteredModels.length / itemsPerPage);
+              if (currentPage > totalPages && totalPages > 0) {
+                currentPage = totalPages;
+              }
+              
+              const startIndex = (currentPage - 1) * itemsPerPage;
+              const endIndex = Math.min(startIndex + itemsPerPage, filteredModels.length);
+              let currentIndex = 0;
+              let displayedModels = 0;
+              
+              // Change grid to accommodate section headers
+              grid.className = "space-y-6";
+              
+              sortedPrefixes.forEach((prefix) => {
+                const modelsInGroup = groupedModels[prefix];
+                
+                // Check if any models in this group should be displayed in current page
+                const groupStartIndex = currentIndex;
+                const groupEndIndex = currentIndex + modelsInGroup.length;
+                
+                if (groupEndIndex > startIndex && groupStartIndex < endIndex) {
+                  // Create prefix section
+                  const section = document.createElement("div");
+                  section.className = "space-y-3";
+                  
+                  // Create prefix header
+                  const header = document.createElement("h3");
+                  header.className = "text-lg font-semibold text-gray-800 dark:text-gray-200 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center gap-2";
+                  header.innerHTML = `<i class="fas fa-layer-group text-primary dark:text-primary-dark"></i> ${prefix.toUpperCase()} <span class="text-sm font-normal text-gray-500 dark:text-gray-400">(${modelsInGroup.length})</span>`;
+                  
+                  // Create models grid for this group
+                  const groupGrid = document.createElement("div");
+                  groupGrid.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4";
+                  
+                  // Add models that should be displayed
+                  modelsInGroup.forEach((model, modelIndex) => {
+                    const absoluteIndex = groupStartIndex + modelIndex;
+                    if (absoluteIndex >= startIndex && absoluteIndex < endIndex) {
+                      const card = createModelCard(model);
+                      groupGrid.appendChild(card);
+                      displayedModels++;
+                    }
+                  });
+                  
+                  if (groupGrid.children.length > 0) {
+                    section.appendChild(header);
+                    section.appendChild(groupGrid);
+                    grid.appendChild(section);
+                  }
+                }
+                
+                currentIndex += modelsInGroup.length;
+              });
+              
+              // Render pagination
+              renderPagination(totalPages);
+            }
+            
+            // Create individual model card
+            function createModelCard(model) {
+              const modelConfig = configData.models[model.name] || {};
+              const hasMappedName = modelConfig.mapping && modelConfig.mapping !== model.name;
+              
+              const card = document.createElement("div");
+              card.className = "bg-white dark:bg-gray-800 rounded-xl shadow-apple dark:shadow-apple-dark p-4 transition-all duration-300 flex justify-between items-center hover:shadow-lg";
+              
+              // 檢測是否是自訂模型
+              const isCustom = configData.custom_models && configData.custom_models.some((m) => m.id.toLowerCase() === model.name.toLowerCase());
+              if (isCustom) {
+                card.classList.add("border-l-4", "border-green-500");
+              }
+              
+              // Model info content
+              const modelInfo = document.createElement("div");
+              modelInfo.className = "flex-grow pr-3";
+              
+              // Name container
+              const nameSpan = document.createElement("div");
+              nameSpan.className = "font-medium text-gray-900 dark:text-white transition-colors";
+              
+              if (hasMappedName) {
+                const originalName = document.createElement("span");
+                originalName.className = "line-through text-red-500 dark:text-red-400 mr-2 transition-colors";
+                originalName.textContent = model.name;
+                const mappingName = document.createElement("span");
+                mappingName.textContent = modelConfig.mapping;
+                nameSpan.appendChild(originalName);
+                nameSpan.appendChild(mappingName);
+              } else {
+                nameSpan.textContent = model.name;
+              }
+              
+              // 如果是自訂模型，添加標籤
+              if (isCustom) {
+                const customTag = document.createElement("span");
+                customTag.className = "ml-2 px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs rounded";
+                customTag.textContent = "自訂";
+                nameSpan.appendChild(customTag);
+              }
+              
+              modelInfo.appendChild(nameSpan);
+              
+              // Control buttons
+              const controls = document.createElement("div");
+              controls.className = "flex items-center gap-3";
+              
+              // State checkbox
+              const checkbox = document.createElement("div");
+              checkbox.className = "w-6 h-6 flex items-center justify-center rounded transition-colors cursor-pointer";
+              
+              if (model.state === "-") {
+                checkbox.classList.add("bg-gray-200", "dark:bg-gray-700");
+              } else if (model.state === "R") {
+                checkbox.classList.add("bg-yellow-100", "dark:bg-yellow-900", "text-yellow-700", "dark:text-yellow-400", "font-bold");
+                checkbox.innerHTML = "R";
+              } else if (model.state === "X") {
+                checkbox.classList.add("bg-red-100", "dark:bg-red-900", "text-red-600", "dark:text-red-400");
+                checkbox.innerHTML = '<i class="fas fa-times"></i>';
+              }
+              
+              checkbox.onclick = () => toggleModelState(model);
+              
+              // Edit and reset buttons
+              const buttonControls = document.createElement("div");
+              buttonControls.className = "flex gap-2";
+              
+              const editBtn = document.createElement("button");
+              editBtn.className = "text-primary dark:text-primary-dark hover:opacity-80 transition-opacity";
+              editBtn.innerHTML = '<i class="fas fa-pen"></i>';
+              editBtn.onclick = (e) => {
+                e.stopPropagation();
+                showEditModal(model);
+              };
+              
+              const resetBtn = document.createElement("button");
+              resetBtn.className = "text-gray-500 dark:text-gray-400 hover:opacity-80 transition-opacity " + (hasMappedName ? "" : "opacity-0 pointer-events-none");
+              resetBtn.innerHTML = '<i class="fas fa-undo"></i>';
+              resetBtn.onclick = (e) => {
+                e.stopPropagation();
+                resetMapping(model);
+              };
+              
+              // 如果是自訂模型，添加刪除按鈕
+              if (isCustom) {
+                const deleteBtn = document.createElement("button");
+                deleteBtn.className = "text-red-500 dark:text-red-400 hover:opacity-80 transition-opacity";
+                deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                deleteBtn.onclick = (e) => {
+                  e.stopPropagation();
+                  deleteCustomModel(model.name);
+                };
+                buttonControls.appendChild(deleteBtn);
+              }
+              
+              buttonControls.appendChild(editBtn);
+              buttonControls.appendChild(resetBtn);
+              controls.appendChild(checkbox);
+              controls.appendChild(buttonControls);
+              
+              card.appendChild(modelInfo);
+              card.appendChild(controls);
+              
+              return card;
+            }
+
+            // Render model cards with pagination (fallback function)
             function renderModelCards() {
               const grid = document.getElementById("modelsGrid");
               grid.innerHTML = "";
@@ -624,117 +905,9 @@
                 noResultsMessage.classList.remove("hidden");
               } else {
                 noResultsMessage.classList.add("hidden");
+                grid.className = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4";
                 modelsToDisplay.forEach((model) => {
-                  const modelConfig = configData.models[model.name] || {};
-                  const hasMappedName =
-                    modelConfig.mapping && modelConfig.mapping !== model.name;
-                  const card = document.createElement("div");
-                  card.className =
-                    "bg-white dark:bg-gray-800 rounded-xl shadow-apple dark:shadow-apple-dark p-4 transition-all duration-300 flex justify-between items-center hover:shadow-lg";
-                  // 檢測是否是自訂模型
-                  const isCustom =
-                    configData.custom_models &&
-                    configData.custom_models.some(
-                      (m) => m.id.toLowerCase() === model.name.toLowerCase()
-                    );
-                  if (isCustom) {
-                    card.classList.add("border-l-4", "border-green-500");
-                  }
-                  // Model info content
-                  const modelInfo = document.createElement("div");
-                  modelInfo.className = "flex-grow pr-3";
-                  // Name container
-                  const nameSpan = document.createElement("div");
-                  nameSpan.className =
-                    "font-medium text-gray-900 dark:text-white transition-colors";
-                  if (hasMappedName) {
-                    const originalName = document.createElement("span");
-                    originalName.className =
-                      "line-through text-red-500 dark:text-red-400 mr-2 transition-colors";
-                    originalName.textContent = model.name;
-                    const mappingName = document.createElement("span");
-                    mappingName.textContent = modelConfig.mapping;
-                    nameSpan.appendChild(originalName);
-                    nameSpan.appendChild(mappingName);
-                  } else {
-                    nameSpan.textContent = model.name;
-                  }
-                  // 如果是自訂模型，添加標籤
-                  if (isCustom) {
-                    const customTag = document.createElement("span");
-                    customTag.className =
-                      "ml-2 px-1.5 py-0.5 bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 text-xs rounded";
-                    customTag.textContent = "自訂";
-                    nameSpan.appendChild(customTag);
-                  }
-                  modelInfo.appendChild(nameSpan);
-                  // Control buttons
-                  const controls = document.createElement("div");
-                  controls.className = "flex items-center gap-3";
-                  // State checkbox
-                  const checkbox = document.createElement("div");
-                  checkbox.className =
-                    "w-6 h-6 flex items-center justify-center rounded transition-colors cursor-pointer";
-                  if (model.state === "-") {
-                    checkbox.classList.add("bg-gray-200", "dark:bg-gray-700");
-                  } else if (model.state === "R") {
-                    checkbox.classList.add(
-                      "bg-yellow-100",
-                      "dark:bg-yellow-900",
-                      "text-yellow-700",
-                      "dark:text-yellow-400",
-                      "font-bold"
-                    );
-                    checkbox.innerHTML = "R";
-                  } else if (model.state === "X") {
-                    checkbox.classList.add(
-                      "bg-red-100",
-                      "dark:bg-red-900",
-                      "text-red-600",
-                      "dark:text-red-400"
-                    );
-                    checkbox.innerHTML = '<i class="fas fa-times"></i>';
-                  }
-                  checkbox.onclick = () => toggleModelState(model);
-                  // Edit and reset buttons
-                  const buttonControls = document.createElement("div");
-                  buttonControls.className = "flex gap-2";
-                  const editBtn = document.createElement("button");
-                  editBtn.className =
-                    "text-primary dark:text-primary-dark hover:opacity-80 transition-opacity";
-                  editBtn.innerHTML = '<i class="fas fa-pen"></i>';
-                  editBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    showEditModal(model);
-                  };
-                  const resetBtn = document.createElement("button");
-                  resetBtn.className =
-                    "text-gray-500 dark:text-gray-400 hover:opacity-80 transition-opacity " +
-                    (hasMappedName ? "" : "opacity-0 pointer-events-none");
-                  resetBtn.innerHTML = '<i class="fas fa-undo"></i>';
-                  resetBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    resetMapping(model);
-                  };
-                  // 如果是自訂模型，添加刪除按鈕
-                  if (isCustom) {
-                    const deleteBtn = document.createElement("button");
-                    deleteBtn.className =
-                      "text-red-500 dark:text-red-400 hover:opacity-80 transition-opacity";
-                    deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
-                    deleteBtn.onclick = (e) => {
-                      e.stopPropagation();
-                      deleteCustomModel(model.name);
-                    };
-                    buttonControls.appendChild(deleteBtn);
-                  }
-                  buttonControls.appendChild(editBtn);
-                  buttonControls.appendChild(resetBtn);
-                  controls.appendChild(checkbox);
-                  controls.appendChild(buttonControls);
-                  card.appendChild(modelInfo);
-                  card.appendChild(controls);
-                  // 移除卡片點擊事件，只保留按鈕的點擊功能
+                  const card = createModelCard(model);
                   grid.appendChild(card);
                 });
               }
@@ -760,7 +933,7 @@
               prevBtn.onclick = () => {
                 if (currentPage > 1) {
                   currentPage--;
-                  renderModelCards();
+                  filterModels();
                 }
               };
               pagination.appendChild(prevBtn);
@@ -781,7 +954,7 @@
                 pageBtn.onclick = () => {
                   if (i !== currentPage) {
                     currentPage = i;
-                    renderModelCards();
+                    filterModels();
                   }
                 };
                 pagination.appendChild(pageBtn);
@@ -798,7 +971,7 @@
               nextBtn.onclick = () => {
                 if (currentPage < totalPages) {
                   currentPage++;
-                  renderModelCards();
+                  filterModels();
                 }
               };
               pagination.appendChild(nextBtn);
