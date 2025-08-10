@@ -16,11 +16,41 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ChatTool>>,
     pub stream_options: Option<StreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_body: Option<ExtraBody>,
 }
 
 #[derive(Deserialize)]
 pub struct StreamOptions {
     pub include_usage: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct ThinkingConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub struct ExtraBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub google: Option<GoogleConfig>,
+}
+
+#[derive(Deserialize)]
+pub struct GoogleConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_config: Option<GoogleThinkingConfig>,
+}
+
+#[derive(Deserialize)]
+pub struct GoogleThinkingConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<i32>,
 }
 
 // 定義支援 OpenAI content 格式的 enum (String 或陣列)
@@ -130,6 +160,10 @@ pub(crate) struct Config {
     pub(crate) models: std::collections::HashMap<String, ModelConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) custom_models: Option<Vec<CustomModel>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) api_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) use_v1_api: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

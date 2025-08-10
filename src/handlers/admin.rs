@@ -65,7 +65,9 @@ fn load_config() -> Result<Config, Box<dyn std::error::Error>> {
         Ok(Config {
             enable: Some(false),
             models: std::collections::HashMap::new(),
-            custom_models: Some(Vec::new()), // 初始化為空陣列而非 None
+            custom_models: Some(Vec::new()),
+            api_token: None,
+            use_v1_api: None,
         })
     }
 }

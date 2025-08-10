@@ -22,6 +22,7 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 - [授權協議](#-授權協議)
 
 ## ✨ 主要特點
+- 🌐 支持使用代理的 POE URL（環境變量為 `POE_BASE_URL` 和 `POE_FILE_UPLOAD_URL`）
 - 🔄 支持 OpenAI API 格式（`/models` 和 `/chat/completions`）
 - 💬 支持串流和非串流模式
 - 🔧 支持工具調用 (Tool Calls)
@@ -32,6 +33,7 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 - 🔒 支持速率限制控制，防止請求過於頻繁
 - 📦 內建 URL 和 Base64 圖片緩存系統，減少重複上傳
 - 🧠 基於 Deepseek OpenAI 格式，把 `Thinking...` 的推理思考內容放到`reasoning_content`中
+- 🎯 支持高級推理選項（reasoning_effort、thinking、extra_body 參數）
 - 🐳 Docker 佈置支持
 
 ## 🔧 安裝指南
@@ -83,6 +85,8 @@ services:
       - RATE_LIMIT_MS=100
       - URL_CACHE_TTL_SECONDS=259200
       - URL_CACHE_SIZE_MB=100
+      - POE_BASE_URL=https://api.poe.com
+      - POE_FILE_UPLOAD_URL=https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST
     volumes:
       - /path/to/data:/data
 ```
@@ -121,7 +125,7 @@ curl http://localhost:8080/v1/chat/completions \
   }'
 ```
 
-4. 可以在 `http://localhost:8080/admin` 管理模型
+4. 可以在 `http://localhost:8080/admin` 管理模型和配置 API Token
 
 ## 📖 API 文檔
 
@@ -146,7 +150,9 @@ curl http://localhost:8080/v1/chat/completions \
   "tools": [],
   "stream_options": {
     "include_usage": false
-  }
+  },
+  "reasoning_effort": "medium",
+  "extra_body": {}
 }
 ```
 
@@ -154,13 +160,16 @@ curl http://localhost:8080/v1/chat/completions \
 | 參數           | 類型     | 預設值       | 說明                                                 |
 |---------------|----------|--------------|------------------------------------------------------|
 | model         | string   | (必填)       | 要請求的模型名稱                                     |
-| messages      | array    | (必填)       | 聊天訊息列表，陣列內須有 role 與 content              |
+| messages      | array    | (必填)       | 聊天訊息列表，支援純文字或多模態內容（文字+圖片）      |
 | temperature   | float    | null         | 探索性(0~2)。控制回答的多樣性，數值越大越發散         |
 | stream        | bool     | false        | 是否串流回傳（SSE），true 開啟串流                    |
 | tools         | array    | null         | 工具描述 (Tool Calls) 支援（如 function calling）     |
-| logit_bias    | object   | null         | 特定 token 的偏好值                                  |
-| stop          | array    | null         | 停止生成的文本序列                                   |
-| stream_options| object   | null         | 串流細部選項，目前支援 {"include_usage": bool}: 是否附帶用量統計|
+| logit_bias    | object   | null         | 特定 token 的偏好值，格式為 key-value 對應             |
+| stop          | array    | null         | 停止生成的文字序列陣列                               |
+| stream_options| object   | null         | 串流細部選項，支援 include_usage (bool): 是否附帶用量統計|
+| reasoning_effort| string | null         | 推理努力程度，可選值：low, medium, high               |
+| thinking      | object   | null         | 思考配置，可設定 budget_tokens (0-30768): 思考階段的 token 預算|
+| extra_body    | object   | null         | 額外的請求參數，支援 Google 特定配置如 google.thinking_config.thinking_budget(0-30768)|                     |
 
 > 其他參數如 top_p、n 等 OpenAI 參數暫不支援，提交會被忽略。
 
@@ -176,7 +185,8 @@ curl http://localhost:8080/v1/chat/completions \
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "回應內容"
+        "content": "回應內容",
+        "reasoning_content": "推理思考過程"
       },
       "finish_reason": "stop"
     }
@@ -228,6 +238,8 @@ curl http://localhost:8080/v1/chat/completions \
 - `RATE_LIMIT_MS` - 全局速率限制（毫秒，默認：`100`，設置為 `0` 禁用）
 - `URL_CACHE_TTL_SECONDS` - Poe CDN URL緩存有效期（秒，默認：`259200`，3天）
 - `URL_CACHE_SIZE_MB` - Poe CDN URL緩存最大容量（MB，默認：`100`）
+- `POE_BASE_URL` - Poe API 基礎 URL（默認：`https://api.poe.com`）
+- `POE_FILE_UPLOAD_URL` - Poe 文件上傳 URL（默認：`https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST`）
 
 ## ❓ 常見問題
 

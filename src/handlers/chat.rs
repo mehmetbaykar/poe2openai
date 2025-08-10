@@ -163,11 +163,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     // 創建 chat 請求
     let chat_request_obj = create_chat_request(
         &original_model,
-        messages,
-        chat_request.temperature,
-        chat_request.tools,
-        chat_request.logit_bias,
-        chat_request.stop,
+        &chat_request,
     )
     .await;
 

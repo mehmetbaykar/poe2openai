@@ -83,6 +83,8 @@ pub async fn get_cached_config() -> Arc<Config> {
                         enable: Some(false),
                         models: std::collections::HashMap::new(),
                         custom_models: None,
+                        api_token: None,
+                        use_v1_api: None,
                     })
                 }
             }

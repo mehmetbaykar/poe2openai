@@ -1,4 +1,4 @@
-use crate::{cache::get_cached_config, types::*};
+use crate::{cache::get_cached_config, types::*, poe_client::PoeClientWrapper};
 use chrono::Utc;
 use poe_api_process::{ModelInfo, get_model_list};
 use salvo::prelude::*;
@@ -12,6 +12,53 @@ use tracing::{debug, error, info};
 // 注意：此緩存不適用於 /api/models 路徑
 static API_MODELS_CACHE: RwLock<Option<Arc<Vec<ModelInfo>>>> = RwLock::const_new(None);
 
+/// 根據配置獲取模型列表
+async fn get_models_from_api(config: &Config) -> Result<Vec<ModelInfo>, String> {
+    let use_v1_api = config.use_v1_api.unwrap_or(false);
+    
+    if use_v1_api {
+        // 使用 v1/models API
+        if let Some(api_token) = &config.api_token {
+            info!("🔄 使用 v1/models API 獲取模型列表");
+            let client = PoeClientWrapper::new("dummy", api_token);
+            match client.get_v1_model_list().await {
+                Ok(model_response) => {
+                    let models = model_response.data.into_iter().map(|model| ModelInfo {
+                        id: model.id.to_lowercase(),
+                        object: model.object,
+                        created: model.created,
+                        owned_by: model.owned_by,
+                    }).collect();
+                    Ok(models)
+                }
+                Err(e) => {
+                    error!("❌ v1/models API 請求失敗: {}", e);
+                    Err(format!("v1/models API 請求失敗: {}", e))
+                }
+            }
+        } else {
+            error!("❌ 配置了使用 v1/models API 但未提供 api_token");
+            Err("配置了使用 v1/models API 但未提供 api_token".to_string())
+        }
+    } else {
+        // 使用傳統 get_model_list API
+        info!("🔄 使用傳統 get_model_list API 獲取模型列表");
+        match get_model_list(Some("zh-Hant")).await {
+            Ok(model_list) => {
+                let models = model_list.data.into_iter().map(|mut model| {
+                    model.id = model.id.to_lowercase();
+                    model
+                }).collect();
+                Ok(models)
+            }
+            Err(e) => {
+                error!("❌ get_model_list API 請求失敗: {}", e);
+                Err(format!("get_model_list API 請求失敗: {}", e))
+            }
+        }
+    }
+}
+
 #[handler]
 pub async fn get_models(req: &mut Request, res: &mut Response) {
     let path = req.uri().path();
@@ -21,18 +68,11 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
     // 處理 /api/models 特殊路徑 (不使用緩存) ---
     if path == "/api/models" {
         info!("⚡️ api/models 路徑：直接從 Poe 取得（無緩存）");
-        match get_model_list(Some("zh-Hant")).await {
-            Ok(model_list) => {
-                let lowercase_models = model_list
-                    .data
-                    .into_iter()
-                    .map(|mut model| {
-                        model.id = model.id.to_lowercase();
-                        model
-                    })
-                    .collect::<Vec<_>>();
-
-                let models_arc = Arc::new(lowercase_models);
+        
+        let config = get_cached_config().await;
+        match get_models_from_api(&config).await {
+            Ok(models) => {
+                let models_arc = Arc::new(models);
 
                 {
                     let mut cache_guard = API_MODELS_CACHE.write().await;
@@ -48,7 +88,7 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                 let duration = start_time.elapsed();
                 info!(
                     "✅ [/api/models] 成功獲取未過濾模型列表並更新緩存 | 模型數量: {} | 處理時間: {}",
-                    models_arc.len(), // 使用 Arc 的長度
+                    models_arc.len(),
                     crate::utils::format_duration(duration)
                 );
                 res.render(Json(response));
@@ -61,7 +101,7 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                     crate::utils::format_duration(duration)
                 );
                 res.status_code(StatusCode::INTERNAL_SERVER_ERROR);
-                res.render(Json(json!({ "error": e.to_string() })));
+                res.render(Json(json!({ "error": e })));
             }
         }
         return;
@@ -103,17 +143,9 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
             } else {
                 // 緩存確實是空的，從 API 獲取數據
                 info!("⏳ 從 API 取得模型以填充快取中……");
-                match get_model_list(Some("zh-Hant")).await {
-                    Ok(list) => {
-                        let lowercase_models = list
-                            .data
-                            .into_iter()
-                            .map(|mut model| {
-                                model.id = model.id.to_lowercase();
-                                model
-                            })
-                            .collect::<Vec<_>>();
-                        let new_data = Arc::new(lowercase_models);
+                match get_models_from_api(&config).await {
+                    Ok(models) => {
+                        let new_data = Arc::new(models);
                         *write_guard = Some(new_data.clone());
                         api_models_data_arc = new_data;
                         info!("✅ API models cache populated successfully.");
@@ -237,25 +269,16 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
     } else {
         info!("🔌 YAML 停用，直接從 Poe API 獲取模型列表 (無緩存，無 YAML 規則)...");
 
-        match get_model_list(Some("zh-Hant")).await {
-            Ok(model_list) => {
-                let lowercase_models = model_list
-                    .data
-                    .into_iter()
-                    .map(|mut model| {
-                        model.id = model.id.to_lowercase();
-                        model
-                    })
-                    .collect::<Vec<_>>();
-
+        match get_models_from_api(&config).await {
+            Ok(models) => {
                 let response = json!({
                     "object": "list",
-                    "data": lowercase_models
+                    "data": models
                 });
                 let duration = start_time.elapsed();
                 info!(
                     "✅ [直連 Poe] 成功直接獲取模型列表 | 模型數量: {} | 處理時間: {}",
-                    lowercase_models.len(),
+                    models.len(),
                     crate::utils::format_duration(duration)
                 );
                 res.render(Json(response));
