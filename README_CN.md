@@ -7,6 +7,8 @@
 )](https://hub.docker.com/r/jeromeleong/poe2openai)
 [![Docker Pulls](https://img.shields.io/docker/pulls/jeromeleong/poe2openai)](https://hub.docker.com/r/jeromeleong/poe2openai)
 
+[ [English](https://github.com/jeromeleong/poe2openai/blob/master/README_EN.md) | [繁體中文](https://github.com/jeromeleong/poe2openai/blob/master/README.md) | [简体中文](https://github.com/jeromeleong/poe2openai/blob/master/README_CN.md) ]
+
 Poe2OpenAI 是一个将 POE API 转换为 OpenAI API 格式的代理服务。让 Poe 订阅者能够通过 OpenAI API 格式使用 Poe 的各种 AI 模型。
 
 ## 📑 目录
@@ -20,6 +22,7 @@ Poe2OpenAI 是一个将 POE API 转换为 OpenAI API 格式的代理服务。让
 - [授权协议](#-授权协议)
 
 ## ✨ 主要特点
+- 🌐 支持使用代理的 POE URL（环境变量为 `POE_BASE_URL` 和 `POE_FILE_UPLOAD_URL`）
 - 🔄 支持 OpenAI API 格式（`/models` 和 `/chat/completions`）
 - 💬 支持流式和非流式模式
 - 🔧 支持工具调用 (Tool Calls)
@@ -28,8 +31,9 @@ Poe2OpenAI 是一个将 POE API 转换为 OpenAI API 格式的代理服务。让
 - 🤖 支持 Claude/Roo Code 解析，包括 Token 用量统计
 - 📊 Web 管理界面(`/admin`)用于配置模型（模型映射和编辑`/models`显示的模型）
 - 🔒 支持速率限制控制，防止请求过于频繁
-- 📦 内置 URL 和 Base64 图片缓存系统，减少重复上载
+- 📦 内置 URL 和 Base64 图片缓存系统，减少重复上传
 - 🧠 基于 Deepseek OpenAI 格式，把 `Thinking...` 的推理思考内容放到`reasoning_content`中
+- 🎯 支持高级推理选项（reasoning_effort、thinking、extra_body 参数）
 - 🐳 Docker 部署支持
 
 ## 🔧 安装指南
@@ -78,6 +82,8 @@ services:
       - RATE_LIMIT_MS=100
       - URL_CACHE_TTL_SECONDS=259200
       - URL_CACHE_SIZE_MB=100
+      - POE_BASE_URL=https://api.poe.com
+      - POE_FILE_UPLOAD_URL=https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST
     volumes:
       - /path/to/data:/data
 ```
@@ -134,7 +140,9 @@ curl http://localhost:8080/v1/chat/completions \
   "tools": [],
   "stream_options": {
     "include_usage": false
-  }
+  },
+  "reasoning_effort": "medium",
+  "extra_body": {}
 }
 ```
 
@@ -142,13 +150,16 @@ curl http://localhost:8080/v1/chat/completions \
 | 参数           | 类型     | 默认值       | 说明                                                 |
 |---------------|----------|--------------|------------------------------------------------------|
 | model         | string   | (必填)       | 要请求的模型名称                                     |
-| messages      | array    | (必填)       | 聊天消息列表，数组内须有 role 与 content              |
+| messages      | array    | (必填)       | 聊天消息列表，支持纯文字或多模态内容（文字+图片）      |
 | temperature   | float    | null         | 探索性(0~2)。控制回答的多样性，数值越大越发散         |
 | stream        | bool     | false        | 是否流式返回（SSE），true 开启流式                    |
 | tools         | array    | null         | 工具描述 (Tool Calls) 支持（如 function calling）     |
-| logit_bias    | object   | null         | 特定 token 的偏好值                                  |
-| stop          | array    | null         | 停止生成的文本序列                                   |
-| stream_options| object   | null         | 流式细部选项，目前支持 {"include_usage": bool}: 是否附带用量统计|
+| logit_bias    | object   | null         | 特定 token 的偏好值，格式为 key-value 对应             |
+| stop          | array    | null         | 停止生成的文字序列数组                               |
+| stream_options| object   | null         | 流式细部选项，支持 include_usage (bool): 是否附带用量统计|
+| reasoning_effort| string | null         | 推理努力程度，可选值：low, medium, high               |
+| thinking      | object   | null         | 思考配置，可设定 budget_tokens (0-30768): 思考阶段的 token 预算|
+| extra_body    | object   | null         | 额外的请求参数，支持 Google 特定配置如 google.thinking_config.thinking_budget(0-30768)|
 
 > 其他参数如 top_p、n 等 OpenAI 参数暂不支持，提交会被忽略。
 
@@ -164,7 +175,8 @@ curl http://localhost:8080/v1/chat/completions \
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "响应内容"
+        "content": "响应内容",
+        "reasoning_content": "推理思考过程"
       },
       "finish_reason": "stop"
     }
@@ -216,6 +228,8 @@ curl http://localhost:8080/v1/chat/completions \
 - `RATE_LIMIT_MS` - 全局速率限制（毫秒，默认：`100`，设置为 `0` 禁用）
 - `URL_CACHE_TTL_SECONDS` - Poe CDN URL缓存有效期（秒，默认：`259200`，3天）
 - `URL_CACHE_SIZE_MB` - Poe CDN URL缓存最大容量（MB，默认：`100`）
+- `POE_BASE_URL` - Poe API 基础 URL（默认：`https://api.poe.com`）
+- `POE_FILE_UPLOAD_URL` - Poe 文件上传 URL（默认：`https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST`）
 
 ## ❓ 常见问题
 ### Q: Poe API Token 如何获取？

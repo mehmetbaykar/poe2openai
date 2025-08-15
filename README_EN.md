@@ -22,6 +22,7 @@ Poe2OpenAI is a proxy service that converts the POE API to OpenAI API format. It
 - [License](#-license)
 
 ## ✨ Key Features
+- 🌐 Support for proxied POE URLs (environment variables `POE_BASE_URL` and `POE_FILE_UPLOAD_URL`)
 - 🔄 Support for OpenAI API format (`/models` and `/chat/completions`)
 - 💬 Support for streaming and non-streaming modes
 - 🔧 Support for Tool Calls
@@ -30,8 +31,9 @@ Poe2OpenAI is a proxy service that converts the POE API to OpenAI API format. It
 - 🤖 Support for Claude/Roo Code parsing, including token usage statistics
 - 📊 Web admin interface (`/admin`) for model configuration (model mapping and editing models displayed in `/models`)
 - 🔒 Rate limiting support to prevent excessive requests
-- 📦 Built-in URL and Base64 files caching system to reduce duplicate uploads
-- Based on Deepseek OpenAI format, put the `Thinking...` content into `reasoning_content`
+- 📦 Built-in URL and Base64 image caching system to reduce duplicate uploads
+- 🧠 Based on Deepseek OpenAI format, put the `Thinking...` reasoning content into `reasoning_content`
+- 🎯 Support for advanced reasoning options (reasoning_effort, thinking, extra_body parameters)
 - 🐳 Docker deployment support
 
 ## 🔧 Installation Guide
@@ -59,8 +61,6 @@ docker run --name poe2openai -d \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=123456 \
   jeromeleong/poe2openai:latest
-```
-
 ### Using Docker Compose
 Modify according to your personal requirements
 ```yaml
@@ -80,7 +80,11 @@ services:
       - RATE_LIMIT_MS=100
       - URL_CACHE_TTL_SECONDS=259200
       - URL_CACHE_SIZE_MB=100
+      - POE_BASE_URL=https://api.poe.com
+      - POE_FILE_UPLOAD_URL=https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST
     volumes:
+      - /path/to/data:/data
+```
       - /path/to/data:/data
 ```
 
@@ -136,7 +140,9 @@ curl http://localhost:8080/v1/chat/completions \
   "tools": [],
   "stream_options": {
     "include_usage": false
-  }
+  },
+  "reasoning_effort": "medium",
+  "extra_body": {}
 }
 ```
 
@@ -144,13 +150,16 @@ curl http://localhost:8080/v1/chat/completions \
 | Parameter     | Type     | Default      | Description                                          |
 |---------------|----------|--------------|------------------------------------------------------|
 | model         | string   | (required)   | Name of the model to request                         |
-| messages      | array    | (required)   | List of chat messages, each with role and content    |
+| messages      | array    | (required)   | List of chat messages, supports text or multimodal content (text+images) |
 | temperature   | float    | null         | Exploration (0~2). Controls response diversity       |
 | stream        | bool     | false        | Whether to stream the response (SSE)                 |
 | tools         | array    | null         | Tool descriptions (Tool Calls) support               |
-| logit_bias    | object   | null         | Token preference values                              |
-| stop          | array    | null         | Sequences that stop text generation                  |
-| stream_options| object   | null         | Streaming options, supports {"include_usage": bool}: whether to include usage statistics|
+| logit_bias    | object   | null         | Token preference values in key-value format          |
+| stop          | array    | null         | Array of sequences that stop text generation         |
+| stream_options| object   | null         | Streaming options, supports include_usage (bool): whether to include usage statistics|
+| reasoning_effort| string | null         | Reasoning effort level, options: low, medium, high   |
+| thinking      | object   | null         | Thinking configuration, can set budget_tokens (0-30768): token budget for thinking phase|
+| extra_body    | object   | null         | Additional request parameters, supports Google-specific configs like google.thinking_config.thinking_budget(0-30768)|
 
 > Other OpenAI parameters like top_p, n, etc. are not currently supported and will be ignored if submitted.
 
@@ -166,7 +175,8 @@ curl http://localhost:8080/v1/chat/completions \
       "index": 0,
       "message": {
         "role": "assistant",
-        "content": "Response content"
+        "content": "Response content",
+        "reasoning_content": "Reasoning thought process"
       },
       "finish_reason": "stop"
     }
@@ -218,6 +228,8 @@ Server configuration via environment variables:
 - `RATE_LIMIT_MS` - Global rate limit (milliseconds, default: `100`, set to `0` to disable)
 - `URL_CACHE_TTL_SECONDS` - Poe CDN URL cache expiration period (seconds, default: `259200`, 3 days)
 - `URL_CACHE_SIZE_MB` - Maximum Poe CDN URL cache capacity (MB, default: `100`)
+- `POE_BASE_URL` - Poe API base URL (default: `https://api.poe.com`)
+- `POE_FILE_UPLOAD_URL` - Poe file upload URL (default: `https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST`)
 
 ## ❓ FAQ
 ### Q: How do I get a Poe API Token?

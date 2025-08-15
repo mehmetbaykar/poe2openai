@@ -145,9 +145,9 @@ fn openai_message_to_poe(
 
 pub async fn create_chat_request(
     model: &str,
+    messages: Vec<Message>,
     chat_completion_request: &ChatCompletionRequest,
 ) -> ChatRequest {
-    let messages = &chat_completion_request.messages;
     let temperature = chat_completion_request.temperature;
     let original_tools = chat_completion_request.tools.clone();
     let tools = filter_tools_for_poe(&original_tools);
