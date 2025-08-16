@@ -1,4 +1,4 @@
-use crate::{cache::get_cached_config, types::*, poe_client::PoeClientWrapper};
+use crate::{cache::get_cached_config, poe_client::PoeClientWrapper, types::*};
 use chrono::Utc;
 use poe_api_process::{ModelInfo, get_model_list};
 use salvo::prelude::*;
@@ -15,7 +15,7 @@ static API_MODELS_CACHE: RwLock<Option<Arc<Vec<ModelInfo>>>> = RwLock::const_new
 /// 根據配置獲取模型列表
 async fn get_models_from_api(config: &Config) -> Result<Vec<ModelInfo>, String> {
     let use_v1_api = config.use_v1_api.unwrap_or(false);
-    
+
     if use_v1_api {
         // 使用 v1/models API
         if let Some(api_token) = &config.api_token {
@@ -23,12 +23,16 @@ async fn get_models_from_api(config: &Config) -> Result<Vec<ModelInfo>, String> 
             let client = PoeClientWrapper::new("dummy", api_token);
             match client.get_v1_model_list().await {
                 Ok(model_response) => {
-                    let models = model_response.data.into_iter().map(|model| ModelInfo {
-                        id: model.id.to_lowercase(),
-                        object: model.object,
-                        created: model.created,
-                        owned_by: model.owned_by,
-                    }).collect();
+                    let models = model_response
+                        .data
+                        .into_iter()
+                        .map(|model| ModelInfo {
+                            id: model.id.to_lowercase(),
+                            object: model.object,
+                            created: model.created,
+                            owned_by: model.owned_by,
+                        })
+                        .collect();
                     Ok(models)
                 }
                 Err(e) => {
@@ -45,10 +49,14 @@ async fn get_models_from_api(config: &Config) -> Result<Vec<ModelInfo>, String> 
         info!("🔄 使用傳統 get_model_list API 獲取模型列表");
         match get_model_list(Some("zh-Hant")).await {
             Ok(model_list) => {
-                let models = model_list.data.into_iter().map(|mut model| {
-                    model.id = model.id.to_lowercase();
-                    model
-                }).collect();
+                let models = model_list
+                    .data
+                    .into_iter()
+                    .map(|mut model| {
+                        model.id = model.id.to_lowercase();
+                        model
+                    })
+                    .collect();
                 Ok(models)
             }
             Err(e) => {
@@ -68,7 +76,7 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
     // 處理 /api/models 特殊路徑 (不使用緩存) ---
     if path == "/api/models" {
         info!("⚡️ api/models 路徑：直接從 Poe 取得（無緩存）");
-        
+
         let config = get_cached_config().await;
         match get_models_from_api(&config).await {
             Ok(models) => {

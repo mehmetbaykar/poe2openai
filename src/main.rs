@@ -155,7 +155,7 @@ async fn main() {
 
     info!("🛣️  API 路由配置完成");
 
-    let acceptor = TcpListener::new(&bind_address).bind().await;
+    let acceptor = TcpListener::new(bind_address.clone()).bind().await;
     info!("🎯 服務已啟動並監聽於 {}", bind_address);
 
     Server::new(acceptor).serve(router).await;

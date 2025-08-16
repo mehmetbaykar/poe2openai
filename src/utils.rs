@@ -652,16 +652,18 @@ pub fn process_message_content_with_suffixes(
     chat_request: &crate::types::ChatCompletionRequest,
 ) -> String {
     let mut processed_content = content.to_string();
-    
+
     // 處理 function tools - 檢查是否只有 name 字段
     if let Some(tools) = &chat_request.tools {
         for tool in tools {
             // 檢查是否只有 name 字段（description 為 None 或空字符串）
-            let has_description = tool.function.description
+            let has_description = tool
+                .function
+                .description
                 .as_ref()
                 .map(|desc| !desc.is_empty())
                 .unwrap_or(false);
-            
+
             if !has_description {
                 let suffix = format!(" --{}", tool.function.name);
                 debug!("🔧 添加 function name 後綴: {}", suffix);
@@ -669,28 +671,33 @@ pub fn process_message_content_with_suffixes(
             }
         }
     }
-    
+
     // 處理 thinking_budget
     let thinking_budget = if let Some(thinking) = &chat_request.thinking {
         thinking.budget_tokens
     } else if let Some(extra_body) = &chat_request.extra_body {
-        extra_body.google.as_ref()
+        extra_body
+            .google
+            .as_ref()
             .and_then(|g| g.thinking_config.as_ref())
             .and_then(|tc| tc.thinking_budget)
     } else {
         None
     };
     if let Some(budget) = thinking_budget {
-        // 只有在 0-30768 範圍內才添加 --thinking_budget 參數
-        if budget >= 0 && budget <= 30768 {
+        // 只有在正數範圍內才添加 --thinking_budget 參數
+        if budget >= 0 {
             let suffix = format!(" --thinking_budget {}", budget);
             debug!("🧠 添加 thinking_budget 後綴: {}", suffix);
             processed_content.push_str(&suffix);
         } else {
-            debug!("🧠 thinking_budget 值 {} 超出範圍 (0-30768)，跳過添加 --thinking_budget 參數", budget);
+            debug!(
+                "🧠 thinking_budget 值 {} 超出範圍，跳過添加 --thinking_budget 參數",
+                budget
+            );
         }
     }
-    
+
     // 處理 reasoning_effort
     if let Some(effort) = &chat_request.reasoning_effort {
         // 驗證值是否為有效選項
@@ -703,30 +710,37 @@ pub fn process_message_content_with_suffixes(
             warn!("⚠️ 無效的 reasoning_effort 值: {}", effort);
         }
     }
-    
+
     processed_content
 }
 
 /// 過濾掉只有 name 字段的 tools，這些 tools 不應該傳遞給 poe_api_process
-pub fn filter_tools_for_poe(tools: &Option<Vec<poe_api_process::types::ChatTool>>) -> Option<Vec<poe_api_process::types::ChatTool>> {
+pub fn filter_tools_for_poe(
+    tools: &Option<Vec<poe_api_process::types::ChatTool>>,
+) -> Option<Vec<poe_api_process::types::ChatTool>> {
     if let Some(tools_vec) = tools {
         let filtered_tools: Vec<_> = tools_vec
             .iter()
             .filter(|tool| {
                 // 保留有 description 的 tools（不為 None 且不為空字符串）
-                tool.function.description
+                tool.function
+                    .description
                     .as_ref()
                     .map(|desc| !desc.is_empty())
                     .unwrap_or(false)
             })
             .cloned()
             .collect();
-        
+
         if filtered_tools.is_empty() {
             debug!("🔧 所有 tools 都只有 name 字段，移除所有 tools");
             None
         } else {
-            debug!("🔧 過濾後保留 {} 個 tools（原本 {} 個）", filtered_tools.len(), tools_vec.len());
+            debug!(
+                "🔧 過濾後保留 {} 個 tools（原本 {} 個）",
+                filtered_tools.len(),
+                tools_vec.len()
+            );
             Some(filtered_tools)
         }
     } else {

@@ -1,5 +1,5 @@
 # 第一階段：建構環境
-FROM rustlang/rust:nightly-slim AS builder
+FROM rust:1.89.0 AS builder
 
 # 設定建構時的環境變數
 ENV CARGO_TERM_COLOR=always \
@@ -20,14 +20,7 @@ WORKDIR /usr/src/app
 COPY Cargo.toml ./
 
 # 建立虛擬的 src 目錄和主檔案以緩存依賴
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs
-
-# 建構依賴項
-RUN cargo build --release
-
-# 移除虛擬的 src 目錄和建構檔案
-RUN rm -rf src target/release/deps/poe2openai* target/release/poe2openai*
+RUN mkdir src
 
 # 複製實際的源碼和資源文件
 COPY src ./src
@@ -38,7 +31,7 @@ COPY static ./static
 RUN cargo build --release
 
 # 第二階段：執行環境
-FROM debian:bookworm-slim
+FROM debian:12-slim
 
 # 設定執行時的環境變數
 ENV HOST=0.0.0.0 \

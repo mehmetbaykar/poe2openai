@@ -1,4 +1,8 @@
-use crate::{cache::get_cached_config, types::*, utils::{get_text_from_openai_content, extract_tool_call_id, filter_tools_for_poe}};
+use crate::{
+    cache::get_cached_config,
+    types::*,
+    utils::{extract_tool_call_id, filter_tools_for_poe, get_text_from_openai_content},
+};
 use futures_util::Stream;
 use poe_api_process::types::Attachment;
 use poe_api_process::{ChatMessage, ChatRequest, ChatResponse, PoeClient, PoeError};
@@ -15,15 +19,19 @@ pub struct PoeClientWrapper {
 impl PoeClientWrapper {
     pub fn new(model: &str, access_key: &str) -> Self {
         info!("🔑 初始化 POE 客戶端 | 模型: {}", model);
-        
+
         // 從環境變數獲取 POE API 配置，使用預設值
-        let poe_base_url = std::env::var("POE_BASE_URL")
-            .unwrap_or_else(|_| "https://api.poe.com".to_string());
-        let poe_file_upload_url = std::env::var("POE_FILE_UPLOAD_URL")
-            .unwrap_or_else(|_| "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST".to_string());
-        
-        debug!("🔧 POE 配置 | Base URL: {} | Upload URL: {}", poe_base_url, poe_file_upload_url);
-        
+        let poe_base_url =
+            std::env::var("POE_BASE_URL").unwrap_or_else(|_| "https://api.poe.com".to_string());
+        let poe_file_upload_url = std::env::var("POE_FILE_UPLOAD_URL").unwrap_or_else(|_| {
+            "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST".to_string()
+        });
+
+        debug!(
+            "🔧 POE 配置 | Base URL: {} | Upload URL: {}",
+            poe_base_url, poe_file_upload_url
+        );
+
         Self {
             client: PoeClient::new(model, access_key, &poe_base_url, &poe_file_upload_url),
             _model: model.to_string(),
@@ -31,12 +39,14 @@ impl PoeClientWrapper {
     }
 
     /// 獲取 v1/models API 的模型列表
-    pub async fn get_v1_model_list(&self) -> Result<poe_api_process::ModelResponse, poe_api_process::PoeError> {
+    pub async fn get_v1_model_list(
+        &self,
+    ) -> Result<poe_api_process::ModelResponse, poe_api_process::PoeError> {
         let start_time = std::time::Instant::now();
         debug!("📋 發送 v1/models API 請求");
-        
+
         let result = self.client.get_v1_model_list().await;
-        
+
         match &result {
             Ok(model_response) => {
                 let duration = start_time.elapsed();
@@ -55,7 +65,7 @@ impl PoeClientWrapper {
                 );
             }
         }
-        
+
         result
     }
 
@@ -95,7 +105,7 @@ impl PoeClientWrapper {
 fn openai_message_to_poe(
     msg: &Message,
     role_override: Option<String>,
-    chat_completion_request: Option<&ChatCompletionRequest>
+    chat_completion_request: Option<&ChatCompletionRequest>,
 ) -> ChatMessage {
     let mut attachments: Vec<Attachment> = vec![];
     let mut texts: Vec<String> = vec![];
@@ -121,7 +131,7 @@ fn openai_message_to_poe(
     }
 
     let mut content = texts.join("\n");
-    
+
     // 如果是用戶消息且是最後一條消息，應用後綴處理
     if msg.role == "user" {
         if let Some(request) = chat_completion_request {
@@ -153,7 +163,7 @@ pub async fn create_chat_request(
     let tools = filter_tools_for_poe(&original_tools);
     let logit_bias = chat_completion_request.logit_bias.clone();
     let stop = chat_completion_request.stop.clone();
-    
+
     debug!(
         "📝 創建聊天請求 | 模型: {} | 訊息數量: {} | 溫度設置: {:?} | 原始工具數量: {:?} | 過濾後工具數量: {:?}",
         model,
@@ -192,8 +202,7 @@ pub async fn create_chat_request(
             };
             // 將 OpenAI 消息轉換為 Poe 消息
             // 只對最後一條用戶消息應用後綴處理
-            let is_last_user_message = msg.role == "user" &&
-                index == messages.len() - 1;
+            let is_last_user_message = msg.role == "user" && index == messages.len() - 1;
             let request_param = if is_last_user_message {
                 Some(chat_completion_request)
             } else {
@@ -211,7 +220,7 @@ pub async fn create_chat_request(
             poe_message
         })
         .collect();
-    
+
     // 處理工具結果消息
     let mut tool_results = None;
     // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult

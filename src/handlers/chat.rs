@@ -161,12 +161,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     debug!("🔄 請求模式: {}", if stream { "串流" } else { "非串流" });
 
     // 創建 chat 請求
-    let chat_request_obj = create_chat_request(
-        &original_model,
-        messages,
-        &chat_request,
-    )
-    .await;
+    let chat_request_obj = create_chat_request(&original_model, messages, &chat_request).await;
 
     // 檢查是否需要包含 usage 統計
     let include_usage = chat_request
