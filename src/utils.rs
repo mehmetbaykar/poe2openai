@@ -25,7 +25,7 @@ pub async fn process_message_images(
 
     // 收集消息中所有需要處理的URL
     for (msg_idx, message) in messages.iter().enumerate() {
-        if let OpenAiContent::Multi(items) = &message.content {
+        if let Some(OpenAiContent::Multi(items)) = &message.content {
             for (item_idx, item) in items.iter().enumerate() {
                 if let OpenAiContentItem::ImageUrl { image_url } = item {
                     if image_url.url.starts_with("data:") {
@@ -59,7 +59,7 @@ pub async fn process_message_images(
             if let Some((poe_url, _)) = crate::cache::get_cached_url(url) {
                 debug!("✅ URL緩存命中: {} -> {}", url, poe_url);
 
-                if let OpenAiContent::Multi(items) = &mut messages[*msg_idx].content {
+                if let Some(OpenAiContent::Multi(items)) = &mut messages[*msg_idx].content {
                     if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx] {
                         debug!("🔄 從緩存替換URL: {}", poe_url);
                         image_url.url = poe_url;
@@ -102,7 +102,7 @@ pub async fn process_message_images(
                         // 添加到緩存
                         crate::cache::cache_url(original_url, &response.attachment_url, size_bytes);
 
-                        if let OpenAiContent::Multi(items) = &mut messages[*msg_idx].content {
+                        if let Some(OpenAiContent::Multi(items)) = &mut messages[*msg_idx].content {
                             if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx]
                             {
                                 debug!(
@@ -144,7 +144,7 @@ pub async fn process_message_images(
             if let Some((poe_url, _)) = crate::cache::get_cached_base64(&hash) {
                 debug!("✅ base64緩存命中 | 哈希: {}... -> {}", &hash[..8], poe_url);
 
-                if let OpenAiContent::Multi(items) = &mut messages[*msg_idx].content {
+                if let Some(OpenAiContent::Multi(items)) = &mut messages[*msg_idx].content {
                     if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx] {
                         debug!("🔄 從緩存替換base64 | URL: {}", poe_url);
                         image_url.url = poe_url;
@@ -228,7 +228,9 @@ pub async fn process_message_images(
                                 response.attachment_url
                             );
 
-                            if let OpenAiContent::Multi(items) = &mut messages[msg_idx].content {
+                            if let Some(OpenAiContent::Multi(items)) =
+                                &mut messages[msg_idx].content
+                            {
                                 if let OpenAiContentItem::ImageUrl { image_url } =
                                     &mut items[item_idx]
                                 {
@@ -292,7 +294,7 @@ pub async fn process_message_images(
                 // 將這些連結添加到用戶消息的image_url中
                 let user_msg = &mut messages[user_idx];
                 match &mut user_msg.content {
-                    OpenAiContent::Text(text) => {
+                    Some(OpenAiContent::Text(text)) => {
                         // 將文本消息轉換為多部分消息，加入圖片
                         let mut items = Vec::new();
                         items.push(OpenAiContentItem::Text { text: text.clone() });
@@ -301,15 +303,25 @@ pub async fn process_message_images(
                                 image_url: ImageUrlContent { url },
                             });
                         }
-                        user_msg.content = OpenAiContent::Multi(items);
+                        user_msg.content = Some(OpenAiContent::Multi(items));
                     }
-                    OpenAiContent::Multi(items) => {
+                    Some(OpenAiContent::Multi(items)) => {
                         // 已經是多部分消息，直接添加圖片
                         for url in poe_cdn_urls {
                             items.push(OpenAiContentItem::ImageUrl {
                                 image_url: ImageUrlContent { url },
                             });
                         }
+                    }
+                    None => {
+                        // 如果沒有內容，創建新的多部分消息
+                        let mut items = Vec::new();
+                        for url in poe_cdn_urls {
+                            items.push(OpenAiContentItem::ImageUrl {
+                                image_url: ImageUrlContent { url },
+                            });
+                        }
+                        user_msg.content = Some(OpenAiContent::Multi(items));
                     }
                 }
             }
@@ -320,10 +332,10 @@ pub async fn process_message_images(
 }
 
 // 從 OpenAIContent 獲取純文本內容
-pub fn get_text_from_openai_content(content: &OpenAiContent) -> String {
+pub fn get_text_from_openai_content(content: &Option<OpenAiContent>) -> String {
     match content {
-        OpenAiContent::Text(s) => s.clone(),
-        OpenAiContent::Multi(items) => {
+        Some(OpenAiContent::Text(s)) => s.clone(),
+        Some(OpenAiContent::Multi(items)) => {
             let mut text_parts = Vec::new();
             for item in items {
                 if let OpenAiContentItem::Text { text } = item {
@@ -345,6 +357,7 @@ pub fn get_text_from_openai_content(content: &OpenAiContent) -> String {
             }
             text_parts.join("\n")
         }
+        None => String::new(),
     }
 }
 
@@ -357,7 +370,7 @@ pub fn is_poe_cdn_url(url: &str) -> bool {
 pub fn extract_poe_cdn_urls_from_message(message: &Message) -> Vec<String> {
     let mut urls = Vec::new();
     match &message.content {
-        OpenAiContent::Multi(items) => {
+        Some(OpenAiContent::Multi(items)) => {
             for item in items {
                 if let OpenAiContentItem::ImageUrl { image_url } = item {
                     if is_poe_cdn_url(&image_url.url) {
@@ -369,9 +382,12 @@ pub fn extract_poe_cdn_urls_from_message(message: &Message) -> Vec<String> {
                 }
             }
         }
-        OpenAiContent::Text(text) => {
+        Some(OpenAiContent::Text(text)) => {
             // 從純文本消息中提取 Poe CDN URL
             extract_urls_from_markdown(text, &mut urls);
+        }
+        None => {
+            // 沒有內容，返回空列表
         }
     }
     urls

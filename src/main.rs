@@ -104,6 +104,11 @@ async fn main() {
     let config_dir = get_env_or_default("CONFIG_DIR", "./");
     let config_path = Path::new(&config_dir).join("models.yaml");
     info!("📁 配置文件路徑: {}", config_path.display());
+    get_env_or_default("POE_BASE_URL", "https://api.poe.com");
+    get_env_or_default(
+        "POE_FILE_UPLOAD_URL",
+        "https://www.quora.com/poe_api/file_upload_3RD_PARTY_POST",
+    );
 
     let salvo_max_size = get_env_or_default("MAX_REQUEST_SIZE", "1073741824")
         .parse()

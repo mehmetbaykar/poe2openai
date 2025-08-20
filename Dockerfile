@@ -31,7 +31,7 @@ COPY static ./static
 RUN cargo build --release
 
 # 第二階段：執行環境
-FROM debian:12-slim
+FROM debian:13-slim
 
 # 設定執行時的環境變數
 ENV HOST=0.0.0.0 \
@@ -78,4 +78,4 @@ EXPOSE ${PORT}
 # 設定標籤
 LABEL maintainer="Jerome Leong <jeromeleong1998@gmail.com>" \
     description="Poe API to OpenAI API 轉換服務" \
-    version="0.6.1"
+    version="0.7.0"

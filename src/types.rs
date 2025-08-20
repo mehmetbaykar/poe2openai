@@ -82,7 +82,12 @@ pub struct ImageUrlContent {
 #[derive(Deserialize, Clone)]
 pub struct Message {
     pub role: String,
-    pub content: OpenAiContent,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<OpenAiContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Serialize)]

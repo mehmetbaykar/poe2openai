@@ -25,7 +25,7 @@ Poe2OpenAI 是一个将 POE API 转换为 OpenAI API 格式的代理服务。让
 - 🌐 支持使用代理的 POE URL（环境变量为 `POE_BASE_URL` 和 `POE_FILE_UPLOAD_URL`）
 - 🔄 支持 OpenAI API 格式（`/models` 和 `/chat/completions`）
 - 💬 支持流式和非流式模式
-- 🔧 支持工具调用 (Tool Calls)
+- 🔧 使用內置的 XML 提示語增加原有工具調用 (Tool Calls) 的兼容性和成功率
 - 🖼️ 支持文件上传并加入对话 (URL 和 Base64)
 - 🌐 对最新 POE API 的 Event 进行完整处理
 - 🤖 支持 Claude/Roo Code 解析，包括 Token 用量统计

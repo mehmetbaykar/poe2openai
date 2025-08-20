@@ -25,7 +25,7 @@ Poe2OpenAI is a proxy service that converts the POE API to OpenAI API format. It
 - 🌐 Support for proxied POE URLs (environment variables `POE_BASE_URL` and `POE_FILE_UPLOAD_URL`)
 - 🔄 Support for OpenAI API format (`/models` and `/chat/completions`)
 - 💬 Support for streaming and non-streaming modes
-- 🔧 Support for Tool Calls
+- 🔧 Use built-in XML prompts to increase compatibility and success rate of existing tool calls
 - 🖼️ Support for file uploads in conversations (URL and Base64)
 - 🌐 Complete handling of Events from the latest POE API
 - 🤖 Support for Claude/Roo Code parsing, including token usage statistics

@@ -110,24 +110,51 @@ fn openai_message_to_poe(
     let mut attachments: Vec<Attachment> = vec![];
     let mut texts: Vec<String> = vec![];
 
-    match &msg.content {
-        OpenAiContent::Text(s) => {
-            texts.push(s.clone());
-        }
-        OpenAiContent::Multi(arr) => {
-            for item in arr {
-                match item {
-                    OpenAiContentItem::Text { text } => texts.push(text.clone()),
-                    OpenAiContentItem::ImageUrl { image_url } => {
-                        debug!("🖼️  處理圖片 URL: {}", image_url.url);
-                        attachments.push(Attachment {
-                            url: image_url.url.clone(),
-                            content_type: None,
-                        });
+    // 處理 content 欄位
+    if let Some(content) = &msg.content {
+        match content {
+            OpenAiContent::Text(s) => {
+                texts.push(s.clone());
+            }
+            OpenAiContent::Multi(arr) => {
+                for item in arr {
+                    match item {
+                        OpenAiContentItem::Text { text } => texts.push(text.clone()),
+                        OpenAiContentItem::ImageUrl { image_url } => {
+                            debug!("🖼️  處理圖片 URL: {}", image_url.url);
+                            attachments.push(Attachment {
+                                url: image_url.url.clone(),
+                                content_type: None,
+                            });
+                        }
                     }
                 }
             }
         }
+    }
+
+    // 處理 tool_calls（如果存在）
+    if let Some(tool_calls) = &msg.tool_calls {
+        debug!(
+            "🔧 處理 assistant 消息中的 tool_calls，數量: {}",
+            tool_calls.len()
+        );
+        // 將 tool_calls 轉換為文本格式添加到內容中
+        for tool_call in tool_calls {
+            let tool_call_text = format!(
+                "Tool Call: {} ({})\nArguments: {}",
+                tool_call.function.name, tool_call.id, tool_call.function.arguments
+            );
+            texts.push(tool_call_text);
+        }
+    }
+
+    // 處理 tool_call_id
+    if let Some(tool_call_id) = &msg.tool_call_id {
+        debug!("🔧 處理 tool 消息中的 tool_call_id: {}", tool_call_id);
+        // 將 tool_call_id 添加到內容開頭
+        let tool_id_text = format!("Tool Call ID: {}", tool_call_id);
+        texts.insert(0, tool_id_text);
     }
 
     let mut content = texts.join("\n");
@@ -225,22 +252,54 @@ pub async fn create_chat_request(
     let mut tool_results = None;
     // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult
     if messages.iter().any(|msg| msg.role == "tool") {
+        // 首先建立 tool_call_id 到工具名稱的映射
+        let mut tool_call_id_to_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        
+        // 從之前的 assistant 消息中提取工具調用信息
+        for msg in &messages {
+            if msg.role == "assistant" {
+                if let Some(tool_calls) = &msg.tool_calls {
+                    for tool_call in tool_calls {
+                        tool_call_id_to_name.insert(tool_call.id.clone(), tool_call.function.name.clone());
+                        debug!("🔧 映射工具調用 | ID: {} | 名稱: {}", tool_call.id, tool_call.function.name);
+                    }
+                }
+            }
+        }
+        
         let mut results = Vec::new();
         for msg in messages {
             if msg.role == "tool" {
-                // 從內容中提取文字部分
-                let content_text = get_text_from_openai_content(&msg.content);
-                if let Some(tool_call_id) = extract_tool_call_id(&content_text) {
-                    debug!("🔧 處理工具結果 | tool_call_id: {}", tool_call_id);
-                    results.push(poe_api_process::types::ChatToolResult {
-                        role: "tool".to_string(),
-                        tool_call_id,
-                        name: "unknown".to_string(),
-                        content: content_text,
-                    });
+                // 優先使用新的 tool_call_id 欄位
+                let tool_call_id = if let Some(id) = &msg.tool_call_id {
+                    id.clone()
                 } else {
-                    debug!("⚠️ 無法從工具消息中提取 tool_call_id");
-                }
+                    // 如果沒有 tool_call_id 欄位，嘗試從內容中提取
+                    let content_text = get_text_from_openai_content(&msg.content);
+                    if let Some(id) = extract_tool_call_id(&content_text) {
+                        id
+                    } else {
+                        debug!("⚠️ 無法從工具消息中提取 tool_call_id");
+                        continue;
+                    }
+                };
+
+                // 從映射中查找工具名稱，如果找不到則使用 "unknown"
+                let tool_name = tool_call_id_to_name.get(&tool_call_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        debug!("⚠️ 無法找到 tool_call_id {} 對應的工具名稱，使用 unknown", tool_call_id);
+                        "unknown".to_string()
+                    });
+
+                let content_text = get_text_from_openai_content(&msg.content);
+                debug!("🔧 處理工具結果 | tool_call_id: {} | 工具名稱: {}", tool_call_id, tool_name);
+                results.push(poe_api_process::types::ChatToolResult {
+                    role: "tool".to_string(),
+                    tool_call_id,
+                    name: tool_name,
+                    content: content_text,
+                });
             }
         }
         if !results.is_empty() {
