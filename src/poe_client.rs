@@ -222,6 +222,8 @@ pub async fn create_chat_request(
                 "assistant" => Some("bot".to_string()),
                 // 總是將 developer 轉換為 user
                 "developer" => Some("user".to_string()),
+                // 總是將 tool 轉換為 user
+                "tool" => Some("user".to_string()),
                 // 只有在 replace_response 為 true 時才轉換 system 為 user
                 "system" if should_replace_response => Some("user".to_string()),
                 // 其他情況保持原樣
