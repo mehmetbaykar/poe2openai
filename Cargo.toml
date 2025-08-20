@@ -10,7 +10,7 @@ license = "MIT"
 keywords = ["poeapi", "openai","ai"]
 
 [dependencies]
-poe_api_process = { path = "0.4.2", features = ["xml"] }
+poe_api_process = { version = "0.4.2", features = ["xml"] }
 tokio = { version = "1.47.1", features = ["full"] }
 futures-util = "0.3.31"
 salvo = { version = "0.82.0", features = ["basic-auth","size-limiter","serve-static","cors"] }
