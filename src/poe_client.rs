@@ -255,20 +255,25 @@ pub async fn create_chat_request(
     // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult
     if messages.iter().any(|msg| msg.role == "tool") {
         // 首先建立 tool_call_id 到工具名稱的映射
-        let mut tool_call_id_to_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        
+        let mut tool_call_id_to_name: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
         // 從之前的 assistant 消息中提取工具調用信息
         for msg in &messages {
             if msg.role == "assistant" {
                 if let Some(tool_calls) = &msg.tool_calls {
                     for tool_call in tool_calls {
-                        tool_call_id_to_name.insert(tool_call.id.clone(), tool_call.function.name.clone());
-                        debug!("🔧 映射工具調用 | ID: {} | 名稱: {}", tool_call.id, tool_call.function.name);
+                        tool_call_id_to_name
+                            .insert(tool_call.id.clone(), tool_call.function.name.clone());
+                        debug!(
+                            "🔧 映射工具調用 | ID: {} | 名稱: {}",
+                            tool_call.id, tool_call.function.name
+                        );
                     }
                 }
             }
         }
-        
+
         let mut results = Vec::new();
         for msg in messages {
             if msg.role == "tool" {
@@ -287,15 +292,22 @@ pub async fn create_chat_request(
                 };
 
                 // 從映射中查找工具名稱，如果找不到則使用 "unknown"
-                let tool_name = tool_call_id_to_name.get(&tool_call_id)
+                let tool_name = tool_call_id_to_name
+                    .get(&tool_call_id)
                     .cloned()
                     .unwrap_or_else(|| {
-                        debug!("⚠️ 無法找到 tool_call_id {} 對應的工具名稱，使用 unknown", tool_call_id);
+                        debug!(
+                            "⚠️ 無法找到 tool_call_id {} 對應的工具名稱，使用 unknown",
+                            tool_call_id
+                        );
                         "unknown".to_string()
                     });
 
                 let content_text = get_text_from_openai_content(&msg.content);
-                debug!("🔧 處理工具結果 | tool_call_id: {} | 工具名稱: {}", tool_call_id, tool_name);
+                debug!(
+                    "🔧 處理工具結果 | tool_call_id: {} | 工具名稱: {}",
+                    tool_call_id, tool_name
+                );
                 results.push(poe_api_process::types::ChatToolResult {
                     role: "tool".to_string(),
                     tool_call_id,
