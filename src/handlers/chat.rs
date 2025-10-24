@@ -175,7 +175,10 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     let output_generator =
         OutputGenerator::new(display_model.clone(), prompt_tokens, include_usage);
 
-    match client.stream_request(chat_request_obj).await {
+    // 處理串流請求
+    let event_stream_result = client.stream_request(chat_request_obj).await;
+    
+    match event_stream_result {
         Ok(mut event_stream) => {
             let first_event = event_stream.next().await;
 
@@ -241,7 +244,7 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
 // 處理串流響應
 async fn handle_stream_response(
     res: &mut Response,
-    event_stream: Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>,
+    event_stream: Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send + '_>>,
     output_generator: OutputGenerator,
 ) {
     let start_time = Instant::now();
@@ -262,8 +265,10 @@ async fn handle_stream_response(
         .insert(header::CONNECTION, "keep-alive".parse().unwrap());
 
     // 處理事件流並生成輸出
+    let events: Vec<Result<ChatResponse, PoeError>> = event_stream.collect().await;
+    let static_stream = stream::iter(events);
     let processed_stream = output_generator
-        .process_stream(Box::pin(event_stream))
+        .process_stream(static_stream)
         .await;
     res.stream(processed_stream);
 
@@ -278,7 +283,7 @@ async fn handle_stream_response(
 // 處理非串流響應
 async fn handle_non_stream_response(
     res: &mut Response,
-    mut event_stream: Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>,
+    mut event_stream: Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send + '_>>,
     output_generator: OutputGenerator,
 ) {
     let start_time = Instant::now();

@@ -72,7 +72,7 @@ impl PoeClientWrapper {
     pub async fn stream_request(
         &self,
         chat_request: ChatRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send + '_>>, PoeError> {
         let start_time = Instant::now();
         debug!(
             "📤 發送串流請求 | 訊息數量: {} | 溫度設置: {:?}",
