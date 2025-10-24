@@ -62,13 +62,58 @@ pub enum OpenAiContent {
 }
 
 // 定義 OpenAI content 陣列內的項目類型
-#[derive(Debug, Deserialize, Clone)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone)]
 pub enum OpenAiContentItem {
-    #[serde(rename = "text")]
     Text { text: String },
-    #[serde(rename = "image_url")]
     ImageUrl { image_url: ImageUrlContent },
+}
+
+impl<'de> serde::Deserialize<'de> for OpenAiContentItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        
+        // Check if it has a type field
+        let item_type = value.get("type")
+            .and_then(|v| v.as_str());
+        
+        // If no type field, try to infer from available fields
+        let inferred_type = if item_type.is_none() {
+            if value.get("image_url").is_some() {
+                Some("image_url")
+            } else if value.get("text").is_some() {
+                Some("text")
+            } else {
+                None
+            }
+        } else {
+            item_type
+        };
+        
+        match inferred_type {
+            Some("text") => {
+                let text = value.get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| serde::de::Error::missing_field("text"))?;
+                Ok(OpenAiContentItem::Text { text: text.to_string() })
+            },
+            Some("image_url") => {
+                let image_url_value = value.get("image_url")
+                    .ok_or_else(|| serde::de::Error::missing_field("image_url"))?;
+                let image_url = ImageUrlContent::deserialize(image_url_value)
+                    .map_err(|e| serde::de::Error::custom(e))?;
+                Ok(OpenAiContentItem::ImageUrl { image_url })
+            },
+            _ => {
+                Err(serde::de::Error::unknown_variant(
+                    item_type.unwrap_or("unknown"), 
+                    &["text", "image_url"]
+                ))
+            }
+        }
+    }
 }
 
 // 定義 image_url 的內容結構
