@@ -216,6 +216,49 @@ pub(crate) struct Config {
     pub(crate) use_v1_api: Option<bool>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+
+    #[test]
+    fn test_openai_content_item_inference() {
+        // Test that OpenAiContentItem correctly infers type from available fields
+        let text_item_json = r#"{
+            "text": "Hello, world!"
+        }"#;
+
+        let result: Result<OpenAiContentItem, _> = serde_json::from_str(text_item_json);
+        assert!(result.is_ok(), "OpenAiContentItem without type field should infer as text");
+
+        let item = result.unwrap();
+        match item {
+            OpenAiContentItem::Text { text } => {
+                assert_eq!(text, "Hello, world!");
+            }
+            _ => panic!("Should have been parsed as text"),
+        }
+
+        let image_item_json = r#"{
+            "image_url": {
+                "url": "https://example.com/image.jpg"
+            }
+        }"#;
+
+        let result: Result<OpenAiContentItem, _> = serde_json::from_str(image_item_json);
+        assert!(result.is_ok(), "OpenAiContentItem without type field should infer as image_url");
+
+        let item = result.unwrap();
+        match item {
+            OpenAiContentItem::ImageUrl { image_url } => {
+                assert_eq!(image_url.url, "https://example.com/image.jpg");
+            }
+            _ => panic!("Should have been parsed as image_url"),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct CustomModel {
     pub(crate) id: String,
