@@ -388,13 +388,18 @@ impl EventHandler for ReplaceResponseEventHandler {
                         let replacement = format!("({})", file_data.url);
                         processed = processed.replace(&img_marker, &replacement);
                         has_refs = true;
-                        debug!("🖼️  Replaced image reference | ID: {} | URL: {}", ref_id, file_data.url);
+                        debug!(
+                            "🖼️  Replaced image reference | ID: {} | URL: {}",
+                            ref_id, file_data.url
+                        );
                     }
                 }
 
                 if has_refs {
                     // If image references were actually included, return processed content immediately
-                    debug!("✅ ReplaceResponse contains image references, sending processed content immediately");
+                    debug!(
+                        "✅ ReplaceResponse contains image references, sending processed content immediately"
+                    );
                     ctx.image_urls_sent = true; // Mark as sent
                     return Some(processed);
                 }
@@ -449,7 +454,9 @@ impl EventHandler for DoneEventHandler {
         // Only process if image URLs were not sent
         if !ctx.image_urls_sent && ctx.replace_buffer.is_some() && !ctx.file_refs.is_empty() {
             let content = ctx.replace_buffer.as_ref().unwrap();
-            debug!("🔍 Checking if there are any unprocessed image references during the completion event");
+            debug!(
+                "🔍 Checking if there are any unprocessed image references during the completion event"
+            );
             let mut processed = content.clone();
             let mut has_refs = false;
 

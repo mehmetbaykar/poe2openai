@@ -9,9 +9,45 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_logprobs: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub logit_bias: Option<HashMap<String, f32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_format: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modalities: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_headers: Option<serde_json::Value>,
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ChatTool>>,
@@ -61,21 +97,86 @@ pub enum OpenAiContent {
     Multi(Vec<OpenAiContentItem>),
 }
 
-// Define item types in OpenAI content array
 #[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum OpenAiContentItem {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image_url")]
-    ImageUrl { image_url: ImageUrlContent },
+    Text {
+        #[serde(default)]
+        r#type: Option<String>,
+        text: String,
+        #[serde(flatten, default)]
+        extra: HashMap<String, serde_json::Value>,
+    },
+    ImageUrl {
+        #[serde(default)]
+        r#type: Option<String>,
+        image_url: ImageUrlContent,
+        #[serde(flatten, default)]
+        extra: HashMap<String, serde_json::Value>,
+    },
+    ToolResult {
+        #[serde(default)]
+        r#type: Option<String>,
+        id: Option<String>,
+        tool_call_id: Option<String>,
+        content: serde_json::Value,
+        #[serde(flatten, default)]
+        extra: HashMap<String, serde_json::Value>,
+    },
+    InputAudio {
+        #[serde(default)]
+        r#type: Option<String>,
+        audio: serde_json::Value,
+        #[serde(flatten, default)]
+        extra: HashMap<String, serde_json::Value>,
+    },
+    Other(serde_json::Value),
+}
+
+impl OpenAiContentItem {
+    #[allow(dead_code)]
+    pub fn content_type(&self) -> Option<&str> {
+        match self {
+            OpenAiContentItem::Text { r#type, .. }
+            | OpenAiContentItem::ImageUrl { r#type, .. }
+            | OpenAiContentItem::ToolResult { r#type, .. }
+            | OpenAiContentItem::InputAudio { r#type, .. } => r#type.as_deref(),
+            OpenAiContentItem::Other(value) => value.get("type").and_then(|v| v.as_str()),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            OpenAiContentItem::Text { text, .. } => Some(text.as_str()),
+            OpenAiContentItem::Other(value) => value.get("text").and_then(|v| v.as_str()),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_image_url(&self) -> Option<&ImageUrlContent> {
+        match self {
+            OpenAiContentItem::ImageUrl { image_url, .. } => Some(image_url),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_image_url_mut(&mut self) -> Option<&mut ImageUrlContent> {
+        match self {
+            OpenAiContentItem::ImageUrl { image_url, .. } => Some(image_url),
+            _ => None,
+        }
+    }
 }
 
 // Define content structure of image_url
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ImageUrlContent {
     pub url: String,
-    // Can be extended with other fields like detail, etc
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 // Update Message structure to use new OpenAiContent
@@ -83,11 +184,19 @@ pub struct ImageUrlContent {
 pub struct Message {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<OpenAiContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -186,4 +295,87 @@ pub(crate) struct ModelConfig {
     pub(crate) replace_response: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) enable: Option<bool>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn deserializes_content_block_without_type() {
+        let payload = json!({
+            "model": "gpt-4o",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": "Ping without explicit type"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let req: ChatCompletionRequest = serde_json::from_value(payload).expect("valid request");
+        assert_eq!(req.messages.len(), 1);
+        match req.messages[0].content.as_ref().expect("content present") {
+            OpenAiContent::Multi(items) => {
+                assert_eq!(items.len(), 1);
+                match &items[0] {
+                    OpenAiContentItem::Text { r#type, text, .. } => {
+                        assert!(r#type.is_none());
+                        assert_eq!(text, "Ping without explicit type");
+                    }
+                    other => panic!("unexpected content variant: {:?}", other),
+                }
+            }
+            other => panic!("unexpected content shape: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn deserializes_tools_missing_required_fields() {
+        let payload = json!({
+            "model": "gpt-4o",
+            "messages": [{
+                "role": "user",
+                "content": "hello"
+            }],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search",
+                        "parameters": {
+                            "properties": {
+                                "query": { "type": "string" }
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "function"
+                }
+            ]
+        });
+
+        let req: ChatCompletionRequest = serde_json::from_value(payload).expect("valid request");
+        let tools = req.tools.expect("tools present");
+        assert_eq!(tools.len(), 2);
+
+        let search_tool = &tools[0];
+        assert_eq!(search_tool.function.name, "search");
+        let params = search_tool
+            .function
+            .parameters
+            .as_ref()
+            .expect("parameters present");
+        assert!(params.required.is_empty());
+        assert!(params.r#type.is_none());
+
+        let fallback_tool = &tools[1];
+        assert!(fallback_tool.function.name.is_empty());
+    }
 }

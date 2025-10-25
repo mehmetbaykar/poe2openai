@@ -78,7 +78,10 @@ pub async fn get_cached_config() -> Arc<Config> {
                     Arc::new(conf)
                 }
                 Err(e) => {
-                    warn!("⚠️ Unable to load config from YAML, falling back to default: {}", e);
+                    warn!(
+                        "⚠️ Unable to load config from YAML, falling back to default: {}",
+                        e
+                    );
                     Arc::new(Config {
                         enable: Some(false),
                         models: std::collections::HashMap::new(),
@@ -233,11 +236,17 @@ pub fn cache_base64(hash: &str, poe_url: &str, size_bytes: usize) {
                 debug!("✅ base64 cache updated | Hash: {}...", hash_prefix);
             }
             Err(e) => {
-                error!("❌ Failed to save base64 cache: {} | Hash: {}...", e, hash_prefix);
+                error!(
+                    "❌ Failed to save base64 cache: {} | Hash: {}...",
+                    e, hash_prefix
+                );
             }
         },
         Err(e) => {
-            error!("❌ Unable to open base64 cache tree: {} | Hash: {}...", e, hash_prefix);
+            error!(
+                "❌ Unable to open base64 cache tree: {} | Hash: {}...",
+                e, hash_prefix
+            );
         }
     }
 }
@@ -274,7 +283,10 @@ pub fn get_cached_base64(hash: &str) -> Option<(String, usize)> {
                             if let Ok(size) = size_str.parse::<usize>() {
                                 // Update expiration time (extend TTL)
                                 refresh_base64_cache_ttl(hash, &poe_url, size);
-                                debug!("✅ base64 cache hit and renewed | Hash: {}...", hash_prefix);
+                                debug!(
+                                    "✅ base64 cache hit and renewed | Hash: {}...",
+                                    hash_prefix
+                                );
                                 return Some((poe_url, size));
                             } else {
                                 error!("❌ Invalid base64 cache size: {}", size_str);
@@ -283,7 +295,10 @@ pub fn get_cached_base64(hash: &str) -> Option<(String, usize)> {
                             // Expired, delete entry
                             if let Ok(tree) = db.open_tree(tree_name) {
                                 let _ = tree.remove(key.as_bytes());
-                                debug!("🗑️ Deleted expired base64 cache | Hash: {}...", hash_prefix);
+                                debug!(
+                                    "🗑️ Deleted expired base64 cache | Hash: {}...",
+                                    hash_prefix
+                                );
                             }
                         }
                     } else {
@@ -303,7 +318,10 @@ pub fn get_cached_base64(hash: &str) -> Option<(String, usize)> {
         }
         Ok(None) => None,
         Err(e) => {
-            error!("❌ Failed to read base64 cache: {} | Hash: {}...", e, hash_prefix);
+            error!(
+                "❌ Failed to read base64 cache: {} | Hash: {}...",
+                e, hash_prefix
+            );
             None
         }
     }

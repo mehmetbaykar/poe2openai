@@ -168,7 +168,10 @@ fn handle_preflight_request(req: &Request, res: &mut Response) {
         }
         Err(e) => {
             // Fallback handling: if dynamic headers have issues, use base headers
-            debug!("⚠️ Dynamic headers setting failed: {}, using base headers", e);
+            debug!(
+                "⚠️ Dynamic headers setting failed: {}, using base headers",
+                e
+            );
             res.headers_mut().insert(
                 header::ACCESS_CONTROL_ALLOW_HEADERS,
                 HeaderValue::from_static(

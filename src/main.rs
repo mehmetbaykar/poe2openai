@@ -18,7 +18,11 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 fn get_env_or_default(key: &str, default: &str) -> String {
     let value = env::var(key).unwrap_or_else(|_| default.to_string());
     if key == "ADMIN_PASSWORD" {
-        debug!("🔧 Environment variable {} = {}", key, "*".repeat(value.len()));
+        debug!(
+            "🔧 Environment variable {} = {}",
+            key,
+            "*".repeat(value.len())
+        );
     } else {
         debug!("🔧 Environment variable {} = {}", key, value);
     }
@@ -59,7 +63,10 @@ fn log_cache_settings() {
             ttl_days, ttl_hours, ttl_mins, ttl_secs
         )
     } else if ttl_hours > 0 {
-        format!("{} hours {} minutes {} seconds", ttl_hours, ttl_mins, ttl_secs)
+        format!(
+            "{} hours {} minutes {} seconds",
+            ttl_hours, ttl_mins, ttl_secs
+        )
     } else if ttl_mins > 0 {
         format!("{} minutes {} seconds", ttl_mins, ttl_secs)
     } else {
@@ -94,7 +101,10 @@ async fn main() {
     if rate_limit_ms == 0 {
         info!("⚙️  Global rate limit: Disabled (RATE_LIMIT_MS=0)");
     } else {
-        info!("⚙️  Global rate limit: Enabled (every {}ms per request)", rate_limit_ms);
+        info!(
+            "⚙️  Global rate limit: Enabled (every {}ms per request)",
+            rate_limit_ms
+        );
     }
 
     let host = get_env_or_default("HOST", "0.0.0.0");

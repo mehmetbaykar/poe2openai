@@ -1,5 +1,5 @@
+use crate::utils::{pretty_json_truncated, redact_headers, redact_json_fields};
 use crate::{cache::get_cached_config, poe_client::PoeClientWrapper, types::*};
-use crate::utils::{redact_headers, redact_json_fields, pretty_json_truncated};
 use chrono::Utc;
 use poe_api_process::{ModelInfo, get_model_list};
 use salvo::prelude::*;
@@ -71,18 +71,20 @@ async fn get_models_from_api(config: &Config) -> Result<Vec<ModelInfo>, String> 
 #[handler]
 pub async fn get_models(req: &mut Request, res: &mut Response) {
     let path = req.uri().path();
-    
+
     // Structure request/response logging with separator
     debug!("------ Incoming Request [GET] {} ------", req.uri());
-    
+
     // Log inbound request metadata with redacted headers
     let method = req.method().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
     let redacted_headers = redact_headers(req.headers());
-    
-    debug!("📋 Received model list request | Method: {} | Path: {} | Query: {} | Headers: {:?}", 
-        method, path, query, redacted_headers);
-    
+
+    debug!(
+        "📋 Received model list request | Method: {} | Path: {} | Query: {} | Headers: {:?}",
+        method, path, query, redacted_headers
+    );
+
     let start_time = Instant::now();
 
     // Handle /api/models special path (no cache) ---
@@ -106,11 +108,15 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                 });
 
                 // Log the response before rendering
-                let response_value = serde_json::to_value(&*models_arc).unwrap_or_else(|_| json!(null));
+                let response_value =
+                    serde_json::to_value(&*models_arc).unwrap_or_else(|_| json!(null));
                 let redacted_response = redact_json_fields(&response_value);
                 let pretty_response = pretty_json_truncated(&redacted_response, 64 * 1024);
-                debug!("📤 Response body (sanitized, truncated):\n{}", pretty_response);
-                
+                debug!(
+                    "📤 Response body (sanitized, truncated):\n{}",
+                    pretty_response
+                );
+
                 debug!("------ Outgoing Response [200] /api/models ------");
 
                 let duration = start_time.elapsed();
@@ -138,7 +144,10 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
     let config = get_cached_config().await;
 
     let is_enabled = config.enable.unwrap_or(false);
-    debug!("🔍 Configuration enable status (from cache): {}", is_enabled);
+    debug!(
+        "🔍 Configuration enable status (from cache): {}",
+        is_enabled
+    );
 
     let yaml_config_map: std::collections::HashMap<String, ModelConfig> = config
         .models
@@ -166,7 +175,9 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
             let mut write_guard = API_MODELS_CACHE.write().await;
             // Check again to prevent another thread from filling cache during write lock acquisition
             if let Some(cached_data) = &*write_guard {
-                debug!("✅ API model cache populated by another thread while waiting for write lock.");
+                debug!(
+                    "✅ API model cache populated by another thread while waiting for write lock."
+                );
                 api_models_data_arc = cached_data.clone();
             } else {
                 // Cache is indeed empty, get data from API
@@ -232,7 +243,10 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                             owned_by: api_model_ref.owned_by.clone(),
                         });
                     } else {
-                        debug!("❌ Exclude API model (YAML disabled): {}", api_model_id_lower);
+                        debug!(
+                            "❌ Exclude API model (YAML disabled): {}",
+                            api_model_id_lower
+                        );
                     }
                 }
                 None => {
@@ -250,7 +264,10 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
         // Process custom models, adding them to the processed model list
         if let Some(custom_models) = &config.custom_models {
             if !custom_models.is_empty() {
-                info!("📋 Processing custom models | Count: {}", custom_models.len());
+                info!(
+                    "📋 Processing custom models | Count: {}",
+                    custom_models.len()
+                );
                 for custom_model in custom_models {
                     let model_id = custom_model.id.to_lowercase();
                     // Check if this ID already exists in processed models
@@ -289,8 +306,11 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
         let response_value = serde_json::to_value(&response).unwrap_or_else(|_| json!(null));
         let redacted_response = redact_json_fields(&response_value);
         let pretty_response = pretty_json_truncated(&redacted_response, 64 * 1024);
-        debug!("📤 Response body (sanitized, truncated):\n{}", pretty_response);
-        
+        debug!(
+            "📤 Response body (sanitized, truncated):\n{}",
+            pretty_response
+        );
+
         debug!("------ Outgoing Response [200] /models ------");
 
         let duration = start_time.elapsed();
@@ -303,7 +323,9 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
 
         res.render(Json(response));
     } else {
-        info!("🔌 YAML disabled, directly get model list from Poe API (no cache, no YAML rules)...");
+        info!(
+            "🔌 YAML disabled, directly get model list from Poe API (no cache, no YAML rules)..."
+        );
 
         match get_models_from_api(&config).await {
             Ok(models) => {
@@ -311,15 +333,19 @@ pub async fn get_models(req: &mut Request, res: &mut Response) {
                     "object": "list",
                     "data": models
                 });
-                
+
                 // Log the response before rendering
-                let response_value = serde_json::to_value(&response).unwrap_or_else(|_| json!(null));
+                let response_value =
+                    serde_json::to_value(&response).unwrap_or_else(|_| json!(null));
                 let redacted_response = redact_json_fields(&response_value);
                 let pretty_response = pretty_json_truncated(&redacted_response, 64 * 1024);
-                debug!("📤 Response body (sanitized, truncated):\n{}", pretty_response);
-                
+                debug!(
+                    "📤 Response body (sanitized, truncated):\n{}",
+                    pretty_response
+                );
+
                 debug!("------ Outgoing Response [200] /models ------");
-                
+
                 let duration = start_time.elapsed();
                 info!(
                     "✅ [Direct Poe] Successfully directly retrieved model list | Model count: {} | Processing time: {}",

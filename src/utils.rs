@@ -29,7 +29,7 @@ pub async fn process_message_images(
     for (msg_idx, message) in messages.iter().enumerate() {
         if let Some(OpenAiContent::Multi(items)) = &message.content {
             for (item_idx, item) in items.iter().enumerate() {
-                if let OpenAiContentItem::ImageUrl { image_url } = item {
+                if let OpenAiContentItem::ImageUrl { image_url, .. } = item {
                     if image_url.url.starts_with("data:") {
                         // Process data URL
                         debug!("🔍 Found data URL");
@@ -37,7 +37,10 @@ pub async fn process_message_images(
                         data_url_indices.push((msg_idx, item_idx));
                     } else if !is_poe_cdn_url(&image_url.url) {
                         // Process external URLs that need uploading
-                        debug!("🔍 Found external URL that needs uploading: {}", image_url.url);
+                        debug!(
+                            "🔍 Found external URL that needs uploading: {}",
+                            image_url.url
+                        );
                         external_urls.push(image_url.url.clone());
                         url_indices.push((msg_idx, item_idx));
                     }
@@ -48,7 +51,10 @@ pub async fn process_message_images(
 
     // Process external URLs
     if !external_urls.is_empty() {
-        debug!("🔄 Preparing to process {} external URLs", external_urls.len());
+        debug!(
+            "🔄 Preparing to process {} external URLs",
+            external_urls.len()
+        );
 
         // Divide external URLs into cache hit and miss groups
         let mut urls_to_upload = Vec::new();
@@ -62,7 +68,7 @@ pub async fn process_message_images(
                 debug!("✅ URL cache hit: {} -> {}", url, poe_url);
 
                 if let Some(OpenAiContent::Multi(items)) = &mut messages[*msg_idx].content {
-                    if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx] {
+                    if let OpenAiContentItem::ImageUrl { image_url, .. } = &mut items[*item_idx] {
                         debug!("🔄 Replace URL from cache: {}", poe_url);
                         image_url.url = poe_url;
                     }
@@ -105,7 +111,8 @@ pub async fn process_message_images(
                         crate::cache::cache_url(original_url, &response.attachment_url, size_bytes);
 
                         if let Some(OpenAiContent::Multi(items)) = &mut messages[*msg_idx].content {
-                            if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx]
+                            if let OpenAiContentItem::ImageUrl { image_url, .. } =
+                                &mut items[*item_idx]
                             {
                                 debug!(
                                     "🔄 Replace URL | Original: {} | Poe: {}",
@@ -144,10 +151,14 @@ pub async fn process_message_images(
 
             // Check cache
             if let Some((poe_url, _)) = crate::cache::get_cached_base64(&hash) {
-                debug!("✅ base64 cache hit | Hash: {}... -> {}", &hash[..8], poe_url);
+                debug!(
+                    "✅ base64 cache hit | Hash: {}... -> {}",
+                    &hash[..8],
+                    poe_url
+                );
 
                 if let Some(OpenAiContent::Multi(items)) = &mut messages[*msg_idx].content {
-                    if let OpenAiContentItem::ImageUrl { image_url } = &mut items[*item_idx] {
+                    if let OpenAiContentItem::ImageUrl { image_url, .. } = &mut items[*item_idx] {
                         debug!("🔄 Replace base64 from cache | URL: {}", poe_url);
                         image_url.url = poe_url;
                     }
@@ -183,7 +194,10 @@ pub async fn process_message_images(
 
                 match handle_data_url_to_temp_file(data_url) {
                     Ok(file_path) => {
-                        debug!("📄 Created temporary file successfully: {}", file_path.display());
+                        debug!(
+                            "📄 Created temporary file successfully: {}",
+                            file_path.display()
+                        );
                         upload_requests.push(FileUploadRequest::LocalFile {
                             file: file_path.to_string_lossy().to_string(),
                             mime_type,
@@ -195,7 +209,11 @@ pub async fn process_message_images(
                         // Clean up created temporary files
                         for path in &temp_files {
                             if let Err(e) = fs::remove_file(path) {
-                                warn!("⚠️ Unable to delete temporary file {}: {}", path.display(), e);
+                                warn!(
+                                    "⚠️ Unable to delete temporary file {}: {}",
+                                    path.display(),
+                                    e
+                                );
                             }
                         }
                         return Err(Box::new(std::io::Error::new(
@@ -210,7 +228,10 @@ pub async fn process_message_images(
             if !upload_requests.is_empty() {
                 match poe_client.client.upload_files_batch(upload_requests).await {
                     Ok(responses) => {
-                        debug!("✅ Successfully uploaded {} temporary files", responses.len());
+                        debug!(
+                            "✅ Successfully uploaded {} temporary files",
+                            responses.len()
+                        );
 
                         // Update cache and save URL mappings
                         for (idx, response) in responses.iter().enumerate() {
@@ -233,10 +254,13 @@ pub async fn process_message_images(
                             if let Some(OpenAiContent::Multi(items)) =
                                 &mut messages[msg_idx].content
                             {
-                                if let OpenAiContentItem::ImageUrl { image_url } =
+                                if let OpenAiContentItem::ImageUrl { image_url, .. } =
                                     &mut items[item_idx]
                                 {
-                                    debug!("🔄 Replace data URL | Poe: {}", response.attachment_url);
+                                    debug!(
+                                        "🔄 Replace data URL | Poe: {}",
+                                        response.attachment_url
+                                    );
                                     image_url.url = response.attachment_url.clone();
                                 }
                             }
@@ -247,7 +271,11 @@ pub async fn process_message_images(
                         // Clean up temporary files
                         for path in &temp_files {
                             if let Err(e) = fs::remove_file(path) {
-                                warn!("⚠️ Unable to delete temporary file {}: {}", path.display(), e);
+                                warn!(
+                                    "⚠️ Unable to delete temporary file {}: {}",
+                                    path.display(),
+                                    e
+                                );
                             }
                         }
                         return Err(Box::new(std::io::Error::new(
@@ -261,7 +289,11 @@ pub async fn process_message_images(
             // Clean up temporary files
             for path in &temp_files {
                 if let Err(e) = fs::remove_file(path) {
-                    warn!("⚠️ Unable to delete temporary file {}: {}", path.display(), e);
+                    warn!(
+                        "⚠️ Unable to delete temporary file {}: {}",
+                        path.display(),
+                        e
+                    );
                 } else {
                     debug!("🗑️ Deleted temporary file: {}", path.display());
                 }
@@ -299,28 +331,47 @@ pub async fn process_message_images(
                     Some(OpenAiContent::Text(text)) => {
                         // Convert text message to multi-part message, add images
                         let mut items = Vec::new();
-                        items.push(OpenAiContentItem::Text { text: text.clone() });
-                        for url in poe_cdn_urls {
+                        items.push(OpenAiContentItem::Text {
+                            r#type: Some("text".to_string()),
+                            text: text.clone(),
+                            extra: HashMap::new(),
+                        });
+                        for url in poe_cdn_urls.iter() {
                             items.push(OpenAiContentItem::ImageUrl {
-                                image_url: ImageUrlContent { url },
+                                r#type: Some("image_url".to_string()),
+                                image_url: ImageUrlContent {
+                                    url: url.clone(),
+                                    extra: HashMap::new(),
+                                },
+                                extra: HashMap::new(),
                             });
                         }
                         user_msg.content = Some(OpenAiContent::Multi(items));
                     }
                     Some(OpenAiContent::Multi(items)) => {
                         // Already multi-part message, add images directly
-                        for url in poe_cdn_urls {
+                        for url in poe_cdn_urls.iter() {
                             items.push(OpenAiContentItem::ImageUrl {
-                                image_url: ImageUrlContent { url },
+                                r#type: Some("image_url".to_string()),
+                                image_url: ImageUrlContent {
+                                    url: url.clone(),
+                                    extra: HashMap::new(),
+                                },
+                                extra: HashMap::new(),
                             });
                         }
                     }
                     None => {
                         // If no content, create new multi-part message
                         let mut items = Vec::new();
-                        for url in poe_cdn_urls {
+                        for url in poe_cdn_urls.iter() {
                             items.push(OpenAiContentItem::ImageUrl {
-                                image_url: ImageUrlContent { url },
+                                r#type: Some("image_url".to_string()),
+                                image_url: ImageUrlContent {
+                                    url: url.clone(),
+                                    extra: HashMap::new(),
+                                },
+                                extra: HashMap::new(),
                             });
                         }
                         user_msg.content = Some(OpenAiContent::Multi(items));
@@ -340,21 +391,34 @@ pub fn get_text_from_openai_content(content: &Option<OpenAiContent>) -> String {
         Some(OpenAiContent::Multi(items)) => {
             let mut text_parts = Vec::new();
             for item in items {
-                if let OpenAiContentItem::Text { text } = item {
-                    // Use serde_json::to_string to handle special characters in text
-                    match serde_json::to_string(text) {
+                match item {
+                    OpenAiContentItem::Text { text, .. } => match serde_json::to_string(text) {
                         Ok(processed_text) => {
-                            // Remove serde_json::to_string added quotes
                             let processed_text = processed_text.trim_matches('"').to_string();
-                            // Replace JSON escaped quotes (\") with regular quotes (")
                             let processed_text = processed_text.replace("\\\"", "\"");
                             text_parts.push(processed_text);
                         }
                         Err(_) => {
-                            // If serialization fails, use original text
                             text_parts.push(text.clone());
                         }
+                    },
+                    OpenAiContentItem::ToolResult { content, .. } => {
+                        if content.is_string() {
+                            if let Some(text) = content.as_str() {
+                                text_parts.push(text.to_string());
+                            }
+                        } else if !content.is_null() {
+                            if let Ok(serialized) = serde_json::to_string(content) {
+                                text_parts.push(serialized);
+                            }
+                        }
                     }
+                    OpenAiContentItem::Other(value) => {
+                        if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                            text_parts.push(text.to_string());
+                        }
+                    }
+                    _ => {}
                 }
             }
             text_parts.join("\n")
@@ -374,11 +438,11 @@ pub fn extract_poe_cdn_urls_from_message(message: &Message) -> Vec<String> {
     match &message.content {
         Some(OpenAiContent::Multi(items)) => {
             for item in items {
-                if let OpenAiContentItem::ImageUrl { image_url } = item {
+                if let OpenAiContentItem::ImageUrl { image_url, .. } = item {
                     if is_poe_cdn_url(&image_url.url) {
                         urls.push(image_url.url.clone());
                     }
-                } else if let OpenAiContentItem::Text { text } = item {
+                } else if let OpenAiContentItem::Text { text, .. } = item {
                     // Extract Poe CDN URL from text
                     extract_urls_from_markdown(text, &mut urls);
                 }
@@ -437,7 +501,10 @@ pub fn handle_data_url_to_temp_file(data_url: &str) -> Result<PathBuf, String> {
     debug!("🔢 Base64 data length: {}", base64_data.len());
     let decoded = match BASE64_STANDARD.decode(base64_data) {
         Ok(data) => {
-            debug!("✅ Base64 decoding successful | Data size: {} bytes", data.len());
+            debug!(
+                "✅ Base64 decoding successful | Data size: {} bytes",
+                data.len()
+            );
             data
         }
         Err(e) => {
@@ -452,7 +519,10 @@ pub fn handle_data_url_to_temp_file(data_url: &str) -> Result<PathBuf, String> {
     // 7. Write data to temporary file
     match fs::write(&file_path, &decoded) {
         Ok(_) => {
-            debug!("✅ Successfully wrote temporary file: {}", file_path.display());
+            debug!(
+                "✅ Successfully wrote temporary file: {}",
+                file_path.display()
+            );
             Ok(file_path)
         }
         Err(e) => {
@@ -581,7 +651,10 @@ pub fn load_config_from_yaml() -> Result<Config, String> {
             }
         }
     } else {
-        debug!("⚠️  {} does not exist, using default empty config", path_str);
+        debug!(
+            "⚠️  {} does not exist, using default empty config",
+            path_str
+        );
         // Return a default Config, indicating the file does not exist or cannot be read
         Ok(Config {
             enable: Some(false),
@@ -737,21 +810,33 @@ pub fn filter_tools_for_poe(
     tools: &Option<Vec<poe_api_process::types::ChatTool>>,
 ) -> Option<Vec<poe_api_process::types::ChatTool>> {
     if let Some(tools_vec) = tools {
-        let filtered_tools: Vec<_> = tools_vec
-            .iter()
-            .filter(|tool| {
-                // Keep tools with description (not None and not empty string)
-                tool.function
-                    .description
-                    .as_ref()
-                    .map(|desc| !desc.is_empty())
-                    .unwrap_or(false)
-            })
-            .cloned()
-            .collect();
+        let mut filtered_tools = Vec::new();
+
+        for tool in tools_vec {
+            let function_name = tool.function.name.trim();
+            if function_name.is_empty() {
+                warn!("⚠️ Skipping tool without function name: {:?}", tool.extra);
+                continue;
+            }
+
+            if tool
+                .function
+                .description
+                .as_ref()
+                .map(|desc| desc.trim().is_empty())
+                .unwrap_or(true)
+            {
+                debug!(
+                    "🔧 Retaining tool '{}' without description to stay OpenAI-compatible",
+                    function_name
+                );
+            }
+
+            filtered_tools.push(tool.clone());
+        }
 
         if filtered_tools.is_empty() {
-            debug!("🔧 All tools only have name fields, removing all tools");
+            debug!("🔧 No valid tools remain after validation, removing all tools");
             None
         } else {
             debug!(
@@ -792,12 +877,12 @@ pub fn truncate_str_by_bytes(s: &str, max: usize) -> (String, bool) {
     if s.len() <= max {
         return (s.to_string(), false);
     }
-    
+
     let mut end = max;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
-    
+
     let truncated = format!("{}… [truncated {} bytes]", &s[..end], s.len() - end);
     (truncated, true)
 }
@@ -805,20 +890,54 @@ pub fn truncate_str_by_bytes(s: &str, max: usize) -> (String, bool) {
 /// Redact sensitive headers from a HeaderMap
 pub fn redact_headers(headers: &salvo::http::HeaderMap) -> HashMap<String, String> {
     let mut redacted = HashMap::new();
-    
+
     for (key, value) in headers.iter() {
         let name = key.as_str();
         let value_str = value.to_str().unwrap_or("<invalid>");
-        
+
         let redacted_value = match name.to_ascii_lowercase().as_str() {
             "authorization" | "cookie" | "set-cookie" => "<redacted>".to_string(),
-            _ => value_str.to_string()
+            _ => value_str.to_string(),
         };
-        
+
         redacted.insert(name.to_string(), redacted_value);
     }
-    
+
     redacted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use poe_api_process::types::{ChatTool, FunctionDefinition};
+
+    #[test]
+    fn filter_tools_preserves_entries_without_description() {
+        let tool = ChatTool {
+            r#type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "search".to_string(),
+                description: None,
+                parameters: None,
+                returns: None,
+                strict: None,
+                extra: HashMap::new(),
+            },
+            extra: HashMap::new(),
+        };
+
+        let filtered = filter_tools_for_poe(&Some(vec![tool.clone()])).expect("tool should remain");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].function.name, "search");
+    }
+
+    #[test]
+    fn filter_tools_drops_entries_without_name() {
+        let mut tool = ChatTool::default();
+        tool.function.name = String::new();
+
+        assert!(filter_tools_for_poe(&Some(vec![tool])).is_none());
+    }
 }
 
 /// Redact sensitive JSON fields (token, password, *cookie* - case insensitive)
@@ -826,7 +945,8 @@ pub fn redact_json_fields(value: &Value) -> Value {
     match value {
         Value::String(s) => {
             // Check if this string contains sensitive data patterns
-            if s.len() > 100 && (s.starts_with("eyJ") || s.starts_with("Bearer ") || s.len() > 500) {
+            if s.len() > 100 && (s.starts_with("eyJ") || s.starts_with("Bearer ") || s.len() > 500)
+            {
                 Value::String("<redacted>".to_string())
             } else {
                 Value::String(s.clone())
@@ -836,11 +956,11 @@ pub fn redact_json_fields(value: &Value) -> Value {
             let mut redacted_obj = serde_json::Map::new();
             for (k, v) in obj {
                 let key_lower = k.to_lowercase();
-                let should_redact = key_lower.contains("token") 
-                    || key_lower.contains("password") 
+                let should_redact = key_lower.contains("token")
+                    || key_lower.contains("password")
                     || key_lower.contains("cookie")
                     || key_lower == "authorization";
-                
+
                 if should_redact {
                     redacted_obj.insert(k.clone(), Value::String("<redacted>".to_string()));
                 } else {
@@ -849,17 +969,16 @@ pub fn redact_json_fields(value: &Value) -> Value {
             }
             Value::Object(redacted_obj)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(redact_json_fields).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.iter().map(redact_json_fields).collect()),
         _ => value.clone(),
     }
 }
 
 /// Create a pretty JSON string with truncation
 pub fn pretty_json_truncated(value: &Value, max_bytes: usize) -> String {
-    let pretty = serde_json::to_string_pretty(value).unwrap_or_else(|_| "Failed to serialize".to_string());
-    
+    let pretty =
+        serde_json::to_string_pretty(value).unwrap_or_else(|_| "Failed to serialize".to_string());
+
     if pretty.len() <= max_bytes {
         pretty
     } else {

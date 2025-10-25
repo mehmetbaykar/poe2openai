@@ -4,8 +4,8 @@ use crate::poe_client::{PoeClientWrapper, create_chat_request};
 use crate::types::*;
 use crate::utils::{
     convert_poe_error_to_openai, count_completion_tokens, count_message_tokens,
-    format_bytes_length, format_duration, process_message_images, redact_headers,
-    redact_json_fields, pretty_json_truncated,
+    format_bytes_length, format_duration, pretty_json_truncated, process_message_images,
+    redact_headers, redact_json_fields,
 };
 use chrono::Utc;
 use futures_util::future::{self};
@@ -25,18 +25,20 @@ use tracing::{debug, error, info, warn};
 #[handler]
 pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     let start_time = Instant::now();
-    
+
     // Structure request/response logging with separator
     debug!("------ Incoming Request [POST] {} ------", req.uri());
-    
+
     // Log inbound request metadata with redacted headers
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
     let redacted_headers = redact_headers(req.headers());
-    
-    debug!("📝 Request metadata | Method: {} | Path: {} | Query: {} | Headers: {:?}", 
-        method, path, query, redacted_headers);
+
+    debug!(
+        "📝 Request metadata | Method: {} | Path: {} | Query: {} | Headers: {:?}",
+        method, path, query, redacted_headers
+    );
 
     let max_size: usize = std::env::var("MAX_REQUEST_SIZE")
         .unwrap_or_else(|_| "1073741824".to_string())
@@ -45,7 +47,10 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
 
     // Get cached models.yaml configuration
     let config = get_cached_config().await;
-    debug!("🔧 Retrieved config from cache | Enable status: {:?}", config.enable);
+    debug!(
+        "🔧 Retrieved config from cache | Enable status: {:?}",
+        config.enable
+    );
 
     // Validate authorization
     let access_key = match req.headers().get("Authorization") {
@@ -79,13 +84,16 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
                     req.messages.len(),
                     req.stream
                 );
-                
+
                 // Log sanitized and truncated request body
                 let request_value = serde_json::to_value(&req).unwrap_or_else(|_| json!(null));
                 let redacted_request = redact_json_fields(&request_value);
                 let pretty_request = pretty_json_truncated(&redacted_request, 64 * 1024);
-                debug!("📋 Request body (sanitized, truncated):\n{}", pretty_request);
-                
+                debug!(
+                    "📋 Request body (sanitized, truncated):\n{}",
+                    pretty_request
+                );
+
                 req
             }
             Err(e) => {
@@ -107,7 +115,10 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
             res.status_code(StatusCode::PAYLOAD_TOO_LARGE);
             res.render(Json(OpenAIErrorResponse {
                 error: OpenAIError {
-                    message: format!("Request size exceeded limit ({} bytes) or read failed: {}", max_size, e),
+                    message: format!(
+                        "Request size exceeded limit ({} bytes) or read failed: {}",
+                        max_size, e
+                    ),
                     r#type: "invalid_request_error".to_string(),
                     code: "payload_too_large".to_string(),
                     param: None,
@@ -130,13 +141,19 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
         });
         if let Some((original_name, _)) = mapping_entry {
             // If mapping found, use original model name
-            debug!("🔄 Reverse model mapping: {} -> {}", requested_model, original_name);
+            debug!(
+                "🔄 Reverse model mapping: {} -> {}",
+                requested_model, original_name
+            );
             (requested_model, original_name.clone())
         } else {
             // If no mapping found, check for direct mapping configuration
             if let Some(model_config) = config.models.get(&requested_model) {
                 if let Some(mapped_name) = &model_config.mapping {
-                    debug!("🔄 Direct model mapping: {} -> {}", requested_model, mapped_name);
+                    debug!(
+                        "🔄 Direct model mapping: {} -> {}",
+                        requested_model, mapped_name
+                    );
                     (requested_model.clone(), requested_model)
                 } else {
                     // No mapping configuration, use original name
@@ -151,7 +168,10 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
         // Configuration not enabled, use original name directly
         (chat_request.model.clone(), chat_request.model.clone())
     };
-    info!("🤖 Using model: {} (original: {})", display_model, original_model);
+    info!(
+        "🤖 Using model: {} (original: {})",
+        display_model, original_model
+    );
 
     // Create client
     let client = PoeClientWrapper::new(&original_model, &access_key);
@@ -177,7 +197,10 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     debug!("📊 Calculated prompt_tokens: {}", prompt_tokens);
 
     let stream = chat_request.stream.unwrap_or(false);
-    debug!("🔄 Request mode: {}", if stream { "streaming" } else { "non-streaming" });
+    debug!(
+        "🔄 Request mode: {}",
+        if stream { "streaming" } else { "non-streaming" }
+    );
 
     // Create chat request
     let chat_request_obj = create_chat_request(&original_model, messages, &chat_request).await;
@@ -254,7 +277,10 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     }
 
     let duration = start_time.elapsed();
-    info!("✅ Request processing completed | Duration: {}", format_duration(duration));
+    info!(
+        "✅ Request processing completed | Duration: {}",
+        format_duration(duration)
+    );
 }
 
 // Handle streaming response
@@ -342,15 +368,18 @@ async fn handle_non_stream_response(
 
     // Create final response
     let response = output_generator.create_final_response(&mut ctx);
-    
+
     // Log the response before rendering
     let response_value = serde_json::to_value(&response).unwrap_or_else(|_| json!(null));
     let redacted_response = redact_json_fields(&response_value);
     let pretty_response = pretty_json_truncated(&redacted_response, 64 * 1024);
-    debug!("📤 Response body (sanitized, truncated):\n{}", pretty_response);
-    
+    debug!(
+        "📤 Response body (sanitized, truncated):\n{}",
+        pretty_response
+    );
+
     debug!("------ Outgoing Response [200] /v1/chat/completions ------");
-    
+
     res.render(Json(response));
 
     let duration = start_time.elapsed();
@@ -399,7 +428,10 @@ impl OutputGenerator {
             if processed.contains(&img_marker) {
                 let replacement = format!("({})", file_data.url);
                 processed = processed.replace(&img_marker, &replacement);
-                debug!("🖼️ Replaced image reference | ID: {} | URL: {}", ref_id, file_data.url);
+                debug!(
+                    "🖼️ Replaced image reference | ID: {} | URL: {}",
+                    ref_id, file_data.url
+                );
                 has_replaced = true;
             }
         }
@@ -666,7 +698,9 @@ impl OutputGenerator {
 
                                             // Check if it's a reasoning content detection marker
                                             if chunk_content == "__REASONING_DETECTED__" {
-                                                debug!("🧠 Detected reasoning content, preparing to send reasoning chunk");
+                                                debug!(
+                                                    "🧠 Detected reasoning content, preparing to send reasoning chunk"
+                                                );
 
                                                 // Get the latest reasoning content (newly added since last sent)
                                                 let current_reasoning_len =
@@ -762,7 +796,9 @@ impl OutputGenerator {
                                     ChatEventType::File => {
                                         // Process file event, if content is returned, it means there are image references to be processed immediately
                                         if let Some(chunk_content) = chunk_content_opt {
-                                            debug!("🖼️ Processing file reference, generating output with URL");
+                                            debug!(
+                                                "🖼️ Processing file reference, generating output with URL"
+                                            );
 
                                             // Determine if role chunk needs to be sent
                                             if !ctx_guard.role_chunk_sent {
@@ -792,7 +828,9 @@ impl OutputGenerator {
                                     ChatEventType::ReplaceResponse => {
                                         // If ReplaceResponse directly returns content, it means it contains image references
                                         if let Some(chunk_content) = chunk_content_opt {
-                                            debug!("🔄 ReplaceResponse contains image references, sending directly");
+                                            debug!(
+                                                "🔄 ReplaceResponse contains image references, sending directly"
+                                            );
 
                                             // Determine if role chunk needs to be sent
                                             if !ctx_guard.role_chunk_sent {

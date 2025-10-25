@@ -119,13 +119,22 @@ fn openai_message_to_poe(
             OpenAiContent::Multi(arr) => {
                 for item in arr {
                     match item {
-                        OpenAiContentItem::Text { text } => texts.push(text.clone()),
-                        OpenAiContentItem::ImageUrl { image_url } => {
+                        OpenAiContentItem::Text { text, .. } => texts.push(text.clone()),
+                        OpenAiContentItem::ImageUrl { image_url, .. } => {
                             debug!("🖼️  Processing image URL: {}", image_url.url);
                             attachments.push(Attachment {
                                 url: image_url.url.clone(),
                                 content_type: None,
                             });
+                        }
+                        OpenAiContentItem::ToolResult { .. } => {
+                            debug!("🧰 Skipping tool_result content in message conversion");
+                        }
+                        OpenAiContentItem::InputAudio { .. } => {
+                            debug!("🎧 Skipping input_audio content in message conversion");
+                        }
+                        OpenAiContentItem::Other(value) => {
+                            debug!("🔍 Unhandled content block: {}", value);
                         }
                     }
                 }
@@ -151,7 +160,10 @@ fn openai_message_to_poe(
 
     // Process tool_call_id
     if let Some(tool_call_id) = &msg.tool_call_id {
-        debug!("🔧 Processing tool_call_id in tool message: {}", tool_call_id);
+        debug!(
+            "🔧 Processing tool_call_id in tool message: {}",
+            tool_call_id
+        );
         // Add tool_call_id to the beginning of content
         let tool_id_text = format!("Tool Call ID: {}", tool_call_id);
         texts.insert(0, tool_id_text);
@@ -255,20 +267,25 @@ pub async fn create_chat_request(
     // Check if there are tool role messages, and convert them to ToolResult
     if messages.iter().any(|msg| msg.role == "tool") {
         // First build mapping from tool_call_id to tool name
-        let mut tool_call_id_to_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        
+        let mut tool_call_id_to_name: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+
         // Extract tool call info from previous assistant messages
         for msg in &messages {
             if msg.role == "assistant" {
                 if let Some(tool_calls) = &msg.tool_calls {
                     for tool_call in tool_calls {
-                        tool_call_id_to_name.insert(tool_call.id.clone(), tool_call.function.name.clone());
-                        debug!("🔧 Mapping tool call | ID: {} | Name: {}", tool_call.id, tool_call.function.name);
+                        tool_call_id_to_name
+                            .insert(tool_call.id.clone(), tool_call.function.name.clone());
+                        debug!(
+                            "🔧 Mapping tool call | ID: {} | Name: {}",
+                            tool_call.id, tool_call.function.name
+                        );
                     }
                 }
             }
         }
-        
+
         let mut results = Vec::new();
         for msg in messages {
             if msg.role == "tool" {
@@ -295,7 +312,10 @@ pub async fn create_chat_request(
                     });
 
                 let content_text = get_text_from_openai_content(&msg.content);
-                debug!("🔧 Processing tool result | tool_call_id: {} | Tool name: {}", tool_call_id, tool_name);
+                debug!(
+                    "🔧 Processing tool result | tool_call_id: {} | Tool name: {}",
+                    tool_call_id, tool_name
+                );
                 results.push(poe_api_process::types::ChatToolResult {
                     role: "tool".to_string(),
                     tool_call_id,
