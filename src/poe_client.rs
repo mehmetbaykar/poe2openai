@@ -12,15 +12,15 @@ use std::time::Instant;
 use tracing::{debug, error, info};
 
 pub struct PoeClientWrapper {
-    pub client: PoeClient, // 修改為公開，以便外部訪問
+    pub client: PoeClient, // Modify to public for external access
     _model: String,
 }
 
 impl PoeClientWrapper {
     pub fn new(model: &str, access_key: &str) -> Self {
-        info!("🔑 初始化 POE 客戶端 | 模型: {}", model);
+        info!("🔑 Initializing POE client | Model: {}", model);
 
-        // 從環境變數獲取 POE API 配置，使用預設值
+        // Get POE API configuration from environment variables, using defaults
         let poe_base_url =
             std::env::var("POE_BASE_URL").unwrap_or_else(|_| "https://api.poe.com".to_string());
         let poe_file_upload_url = std::env::var("POE_FILE_UPLOAD_URL").unwrap_or_else(|_| {
@@ -28,7 +28,7 @@ impl PoeClientWrapper {
         });
 
         debug!(
-            "🔧 POE 配置 | Base URL: {} | Upload URL: {}",
+            "🔧 POE Configuration | Base URL: {} | Upload URL: {}",
             poe_base_url, poe_file_upload_url
         );
 
@@ -38,12 +38,12 @@ impl PoeClientWrapper {
         }
     }
 
-    /// 獲取 v1/models API 的模型列表
+    /// Get model list for v1/models API
     pub async fn get_v1_model_list(
         &self,
     ) -> Result<poe_api_process::ModelResponse, poe_api_process::PoeError> {
         let start_time = std::time::Instant::now();
-        debug!("📋 發送 v1/models API 請求");
+        debug!("📋 Sending v1/models API request");
 
         let result = self.client.get_v1_model_list().await;
 
@@ -51,7 +51,7 @@ impl PoeClientWrapper {
             Ok(model_response) => {
                 let duration = start_time.elapsed();
                 info!(
-                    "✅ v1/models API 請求成功 | 模型數量: {} | 耗時: {}",
+                    "✅ v1/models API request successful | Model count: {} | Duration: {}",
                     model_response.data.len(),
                     crate::utils::format_duration(duration)
                 );
@@ -59,7 +59,7 @@ impl PoeClientWrapper {
             Err(e) => {
                 let duration = start_time.elapsed();
                 error!(
-                    "❌ v1/models API 請求失敗 | 錯誤: {} | 耗時: {}",
+                    "❌ v1/models API request failed | Error: {} | Duration: {}",
                     e,
                     crate::utils::format_duration(duration)
                 );
@@ -75,7 +75,7 @@ impl PoeClientWrapper {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatResponse, PoeError>> + Send>>, PoeError> {
         let start_time = Instant::now();
         debug!(
-            "📤 發送串流請求 | 訊息數量: {} | 溫度設置: {:?}",
+            "📤 Sending streaming request | Message count: {} | Temperature setting: {:?}",
             chat_request.query.len(),
             chat_request.temperature
         );
@@ -84,14 +84,14 @@ impl PoeClientWrapper {
             Ok(_) => {
                 let duration = start_time.elapsed();
                 info!(
-                    "✅ 串流請求建立成功 | 耗時: {}",
+                    "✅ Streaming request established successfully | Duration: {}",
                     crate::utils::format_duration(duration)
                 );
             }
             Err(e) => {
                 let duration = start_time.elapsed();
                 error!(
-                    "❌ 串流請求失敗 | 錯誤: {} | 耗時: {}",
+                    "❌ Streaming request failed | Error: {} | Duration: {}",
                     e,
                     crate::utils::format_duration(duration)
                 );
@@ -101,7 +101,7 @@ impl PoeClientWrapper {
     }
 }
 
-// OpenAI 消息格式轉換為 Poe 消息格式的函數
+// Convert OpenAI message format to Poe message format
 fn openai_message_to_poe(
     msg: &Message,
     role_override: Option<String>,
@@ -110,7 +110,7 @@ fn openai_message_to_poe(
     let mut attachments: Vec<Attachment> = vec![];
     let mut texts: Vec<String> = vec![];
 
-    // 處理 content 欄位
+    // Process content field
     if let Some(content) = &msg.content {
         match content {
             OpenAiContent::Text(s) => {
@@ -121,7 +121,7 @@ fn openai_message_to_poe(
                     match item {
                         OpenAiContentItem::Text { text } => texts.push(text.clone()),
                         OpenAiContentItem::ImageUrl { image_url } => {
-                            debug!("🖼️  處理圖片 URL: {}", image_url.url);
+                            debug!("🖼️  Processing image URL: {}", image_url.url);
                             attachments.push(Attachment {
                                 url: image_url.url.clone(),
                                 content_type: None,
@@ -133,13 +133,13 @@ fn openai_message_to_poe(
         }
     }
 
-    // 處理 tool_calls（如果存在）
+    // Process tool_calls (if exists)
     if let Some(tool_calls) = &msg.tool_calls {
         debug!(
-            "🔧 處理 assistant 消息中的 tool_calls，數量: {}",
+            "🔧 Processing tool_calls in assistant message, count: {}",
             tool_calls.len()
         );
-        // 將 tool_calls 轉換為文本格式添加到內容中
+        // Convert tool_calls to text format and add to content
         for tool_call in tool_calls {
             let tool_call_text = format!(
                 "Tool Call: {} ({})\nArguments: {}",
@@ -149,17 +149,17 @@ fn openai_message_to_poe(
         }
     }
 
-    // 處理 tool_call_id
+    // Process tool_call_id
     if let Some(tool_call_id) = &msg.tool_call_id {
-        debug!("🔧 處理 tool 消息中的 tool_call_id: {}", tool_call_id);
-        // 將 tool_call_id 添加到內容開頭
+        debug!("🔧 Processing tool_call_id in tool message: {}", tool_call_id);
+        // Add tool_call_id to the beginning of content
         let tool_id_text = format!("Tool Call ID: {}", tool_call_id);
         texts.insert(0, tool_id_text);
     }
 
     let mut content = texts.join("\n");
 
-    // 如果是用戶消息且是最後一條消息，應用後綴處理
+    // If user message and is the last message, apply suffix processing
     if msg.role == "user" {
         if let Some(request) = chat_completion_request {
             content = crate::utils::process_message_content_with_suffixes(&content, request);
@@ -171,7 +171,7 @@ fn openai_message_to_poe(
         role,
         content,
         attachments: if !attachments.is_empty() {
-            debug!("📎 添加 {} 個附件到消息", attachments.len());
+            debug!("📎 Adding {} attachments to message", attachments.len());
             Some(attachments)
         } else {
             None
@@ -192,24 +192,24 @@ pub async fn create_chat_request(
     let stop = chat_completion_request.stop.clone();
 
     debug!(
-        "📝 創建聊天請求 | 模型: {} | 訊息數量: {} | 溫度設置: {:?} | 原始工具數量: {:?} | 過濾後工具數量: {:?}",
+        "📝 Creating chat request | Model: {} | Message count: {} | Temperature setting: {:?} | Original tool count: {:?} | Filtered tool count: {:?}",
         model,
         messages.len(),
         temperature,
         original_tools.as_ref().map(|t| t.len()),
         tools.as_ref().map(|t| t.len())
     );
-    // 從緩存獲取 models.yaml 配置
+    // Get models.yaml configuration from cache
     let config: Arc<Config> = get_cached_config().await;
-    // 檢查模型是否需要 replace_response 處理
+    // Check if model needs replace_response processing
     let should_replace_response = if let Some(model_config) = config.models.get(model) {
-        // 使用快取的 config
+        // Use cached config
         model_config.replace_response.unwrap_or(false)
     } else {
         false
     };
     debug!(
-        "🔍 模型 {} 的 replace_response 設置: {}",
+        "🔍 Model {} replace_response setting: {}",
         model, should_replace_response
     );
     let query = messages
@@ -218,19 +218,19 @@ pub async fn create_chat_request(
         .map(|(index, msg)| {
             let original_role = &msg.role;
             let role_override = match original_role.as_str() {
-                // 總是將 assistant 轉換為 bot
+                // Always convert assistant to bot
                 "assistant" => Some("bot".to_string()),
-                // 總是將 developer 轉換為 user
+                // Always convert developer to user
                 "developer" => Some("user".to_string()),
-                // 總是將 tool 轉換為 user
+                // Always convert tool to user
                 "tool" => Some("user".to_string()),
-                // 只有在 replace_response 為 true 時才轉換 system 為 user
+                // Only convert system to user when replace_response is true
                 "system" if should_replace_response => Some("user".to_string()),
-                // 其他情況保持原樣
+                // Keep others as is
                 _ => None,
             };
-            // 將 OpenAI 消息轉換為 Poe 消息
-            // 只對最後一條用戶消息應用後綴處理
+            // Convert OpenAI message to Poe message
+            // Apply suffix processing only to the last user message
             let is_last_user_message = msg.role == "user" && index == messages.len() - 1;
             let request_param = if is_last_user_message {
                 Some(chat_completion_request)
@@ -238,9 +238,9 @@ pub async fn create_chat_request(
                 None
             };
             let poe_message = openai_message_to_poe(msg, role_override, request_param);
-            // 紀錄轉換結果
+            // Log conversion result
             debug!(
-                "🔄 處理訊息 | 原始角色: {} | 轉換後角色: {} | 內容長度: {} | 附件數量: {}",
+                "🔄 Processing message | Original role: {} | Converted role: {} | Content length: {} | Attachment count: {}",
                 original_role,
                 poe_message.role,
                 crate::utils::format_bytes_length(poe_message.content.len()),
@@ -250,20 +250,20 @@ pub async fn create_chat_request(
         })
         .collect();
 
-    // 處理工具結果消息
+    // Process tool results messages
     let mut tool_results = None;
-    // 檢查是否有 tool 角色的消息，並將其轉換為 ToolResult
+    // Check if there are tool role messages, and convert them to ToolResult
     if messages.iter().any(|msg| msg.role == "tool") {
-        // 首先建立 tool_call_id 到工具名稱的映射
+        // First build mapping from tool_call_id to tool name
         let mut tool_call_id_to_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         
-        // 從之前的 assistant 消息中提取工具調用信息
+        // Extract tool call info from previous assistant messages
         for msg in &messages {
             if msg.role == "assistant" {
                 if let Some(tool_calls) = &msg.tool_calls {
                     for tool_call in tool_calls {
                         tool_call_id_to_name.insert(tool_call.id.clone(), tool_call.function.name.clone());
-                        debug!("🔧 映射工具調用 | ID: {} | 名稱: {}", tool_call.id, tool_call.function.name);
+                        debug!("🔧 Mapping tool call | ID: {} | Name: {}", tool_call.id, tool_call.function.name);
                     }
                 }
             }
@@ -272,30 +272,30 @@ pub async fn create_chat_request(
         let mut results = Vec::new();
         for msg in messages {
             if msg.role == "tool" {
-                // 優先使用新的 tool_call_id 欄位
+                // Prioritize using new tool_call_id field
                 let tool_call_id = if let Some(id) = &msg.tool_call_id {
                     id.clone()
                 } else {
-                    // 如果沒有 tool_call_id 欄位，嘗試從內容中提取
+                    // If no tool_call_id field, try to extract from content
                     let content_text = get_text_from_openai_content(&msg.content);
                     if let Some(id) = extract_tool_call_id(&content_text) {
                         id
                     } else {
-                        debug!("⚠️ 無法從工具消息中提取 tool_call_id");
+                        debug!("⚠️ Unable to extract tool_call_id from tool message");
                         continue;
                     }
                 };
 
-                // 從映射中查找工具名稱，如果找不到則使用 "unknown"
+                // Find tool name from mapping, if not found use "unknown"
                 let tool_name = tool_call_id_to_name.get(&tool_call_id)
                     .cloned()
                     .unwrap_or_else(|| {
-                        debug!("⚠️ 無法找到 tool_call_id {} 對應的工具名稱，使用 unknown", tool_call_id);
+                        debug!("⚠️ Unable to find tool name corresponding to tool_call_id {}, using unknown", tool_call_id);
                         "unknown".to_string()
                     });
 
                 let content_text = get_text_from_openai_content(&msg.content);
-                debug!("🔧 處理工具結果 | tool_call_id: {} | 工具名稱: {}", tool_call_id, tool_name);
+                debug!("🔧 Processing tool result | tool_call_id: {} | Tool name: {}", tool_call_id, tool_name);
                 results.push(poe_api_process::types::ChatToolResult {
                     role: "tool".to_string(),
                     tool_call_id,
@@ -307,7 +307,7 @@ pub async fn create_chat_request(
         if !results.is_empty() {
             tool_results = Some(results);
             debug!(
-                "🔧 創建了 {} 個工具結果",
+                "🔧 Created {} tool results",
                 tool_results.as_ref().unwrap().len()
             );
         }

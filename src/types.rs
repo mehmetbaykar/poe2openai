@@ -2,7 +2,7 @@ use poe_api_process::types::{ChatTool, ChatToolCall};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ChatCompletionRequest {
     pub model: String,
     pub messages: Vec<Message>,
@@ -24,45 +24,45 @@ pub struct ChatCompletionRequest {
     pub extra_body: Option<ExtraBody>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct StreamOptions {
     pub include_usage: Option<bool>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ThinkingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<i32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct ExtraBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub google: Option<GoogleConfig>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct GoogleConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_config: Option<GoogleThinkingConfig>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct GoogleThinkingConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<i32>,
 }
 
-// 定義支援 OpenAI content 格式的 enum (String 或陣列)
-#[derive(Debug, Deserialize, Clone)]
+// Define enum supporting OpenAI content format (String or array)
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
 pub enum OpenAiContent {
     Text(String),
     Multi(Vec<OpenAiContentItem>),
 }
 
-// 定義 OpenAI content 陣列內的項目類型
-#[derive(Debug, Deserialize, Clone)]
+// Define item types in OpenAI content array
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "type")]
 pub enum OpenAiContentItem {
     #[serde(rename = "text")]
@@ -71,15 +71,15 @@ pub enum OpenAiContentItem {
     ImageUrl { image_url: ImageUrlContent },
 }
 
-// 定義 image_url 的內容結構
-#[derive(Debug, Deserialize, Clone)]
+// Define content structure of image_url
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ImageUrlContent {
     pub url: String,
-    // 可擴展其他欄位如 detail 等
+    // Can be extended with other fields like detail, etc
 }
 
-// 更新 Message 結構使用新的 OpenAiContent
-#[derive(Deserialize, Clone)]
+// Update Message structure to use new OpenAiContent
+#[derive(Deserialize, Serialize, Clone)]
 pub struct Message {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
