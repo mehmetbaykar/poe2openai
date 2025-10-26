@@ -36,12 +36,12 @@ FROM debian:13-slim
 # 設定執行時的環境變數
 ENV HOST=0.0.0.0 \
     PORT=8080 \
-    ADMIN_USERNAME=admin \
-    ADMIN_PASSWORD=123456 \
+    ADMIN_USERNAME={ADMIN_USERNAME} \
+    ADMIN_PASSWORD={ADMIN_PASSWORD} \
     MAX_REQUEST_SIZE=1073741824 \
     LOG_LEVEL=info \
     RUST_BACKTRACE=1 \
-    TZ=Asia/Taipei \
+    TZ=Europe/London \
     CONFIG_DIR=/data
 
 # 安裝執行時期依賴
