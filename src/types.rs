@@ -250,9 +250,16 @@ pub struct Delta {
     pub content: Option<String>,
     pub refusal: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ChatToolCall>>,
+    pub tool_calls: Option<Vec<ChunkToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct ChunkToolCall {
+    pub index: u32,
+    #[serde(flatten)]
+    pub call: ChatToolCall,
 }
 
 #[derive(Serialize, Clone, Debug)]

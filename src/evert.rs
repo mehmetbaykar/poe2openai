@@ -12,6 +12,7 @@ pub struct EventContext {
     pub replace_buffer: Option<String>,
     pub file_refs: HashMap<String, poe_api_process::types::FileData>,
     pub tool_calls: Vec<poe_api_process::types::ChatToolCall>,
+    pub pending_tool_calls: Vec<ChunkToolCall>,
     is_replace_mode: bool,
     pub error: Option<(StatusCode, OpenAIErrorResponse)>,
     pub done: bool,
@@ -429,7 +430,21 @@ impl EventHandler for JsonEventHandler {
                     tool_call.function.arguments.len()
                 );
             }
+            let start_index = ctx.tool_calls.len() as u32;
+            let mut indexed_tool_calls = Vec::with_capacity(tool_calls.len());
+            for (offset, tool_call) in tool_calls.iter().enumerate() {
+                indexed_tool_calls.push(ChunkToolCall {
+                    index: start_index + offset as u32,
+                    call: tool_call.clone(),
+                });
+            }
+
             ctx.tool_calls.extend(tool_calls.clone());
+            if indexed_tool_calls.is_empty() {
+                ctx.pending_tool_calls.clear();
+            } else {
+                ctx.pending_tool_calls = indexed_tool_calls;
+            }
             debug!(
                 "✅ Tool calls preserved with IDs from Poe (total accumulated: {})",
                 ctx.tool_calls.len()

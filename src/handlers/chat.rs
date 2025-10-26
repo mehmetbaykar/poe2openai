@@ -552,10 +552,7 @@ impl OutputGenerator {
     }
 
     // Create tool call chunk
-    fn create_tool_calls_chunk(
-        &self,
-        tool_calls: &[poe_api_process::types::ChatToolCall],
-    ) -> ChatCompletionChunk {
+    fn create_tool_calls_chunk(&self, tool_calls: &[ChunkToolCall]) -> ChatCompletionChunk {
         let tool_delta = Delta {
             role: None,
             content: None,
@@ -873,10 +870,11 @@ impl OutputGenerator {
                                         }
                                     }
                                     ChatEventType::Json => {
-                                        if !ctx_guard.tool_calls.is_empty() {
+                                        if !ctx_guard.pending_tool_calls.is_empty() {
                                             debug!("🔧 Processing tool calls");
-                                            let tool_chunk = generator
-                                                .create_tool_calls_chunk(&ctx_guard.tool_calls);
+                                            let tool_chunk = generator.create_tool_calls_chunk(
+                                                &ctx_guard.pending_tool_calls,
+                                            );
                                             let json = serde_json::to_string(&tool_chunk).unwrap();
 
                                             if !ctx_guard.role_chunk_sent {
@@ -892,6 +890,7 @@ impl OutputGenerator {
                                                 output_content =
                                                     Some(format!("data: {}\n\n", json));
                                             }
+                                            ctx_guard.pending_tool_calls.clear();
                                         }
                                     }
                                     ChatEventType::Done => {
