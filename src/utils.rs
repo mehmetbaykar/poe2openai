@@ -872,6 +872,77 @@ pub fn extract_tool_call_id(content: &str) -> Option<String> {
     None
 }
 
+/// Validate that tool messages reference valid tool calls from previous assistant messages
+/// Returns Ok(()) if valid, or Err with detailed error message if invalid
+pub fn validate_tool_sequence(messages: &[Message]) -> Result<(), String> {
+    let tool_message_count = messages.iter().filter(|m| m.role == "tool").count();
+
+    if tool_message_count == 0 {
+        // No tool messages, validation passes
+        return Ok(());
+    }
+
+    debug!("🔍 Validating {} tool messages", tool_message_count);
+
+    // Find all assistant messages with tool_calls
+    let mut valid_tool_call_ids = std::collections::HashSet::new();
+    for msg in messages.iter() {
+        if msg.role == "assistant" {
+            if let Some(tool_calls) = &msg.tool_calls {
+                for tool_call in tool_calls {
+                    valid_tool_call_ids.insert(tool_call.id.clone());
+                    debug!("✅ Found valid tool_call_id: {}", tool_call.id);
+                }
+            }
+        }
+    }
+
+    if valid_tool_call_ids.is_empty() {
+        let error_msg = format!(
+            "Tool messages present ({} found) but no assistant messages with tool_calls found in conversation",
+            tool_message_count
+        );
+        error!("❌ {}", error_msg);
+        return Err(error_msg);
+    }
+
+    // Validate each tool message references a valid tool_call_id
+    for tool_msg in messages.iter().filter(|m| m.role == "tool") {
+        let tool_call_id = if let Some(id) = &tool_msg.tool_call_id {
+            id.clone()
+        } else {
+            // Try to extract from content
+            let content_text = get_text_from_openai_content(&tool_msg.content);
+            if let Some(id) = extract_tool_call_id(&content_text) {
+                id
+            } else {
+                let error_msg = format!(
+                    "Tool message missing tool_call_id field and cannot extract from content: {:?}",
+                    content_text.chars().take(100).collect::<String>()
+                );
+                error!("❌ {}", error_msg);
+                return Err(error_msg);
+            }
+        };
+
+        if !valid_tool_call_ids.contains(&tool_call_id) {
+            let error_msg = format!(
+                "Tool message references unknown tool_call_id: {} | Valid IDs: {:?}",
+                tool_call_id, valid_tool_call_ids
+            );
+            error!("❌ {}", error_msg);
+            return Err(error_msg);
+        }
+
+        debug!("✅ Tool message validated: tool_call_id={}", tool_call_id);
+    }
+
+    debug!(
+        "✅ All {} tool messages validated successfully",
+        tool_message_count
+    );
+    Ok(())
+}
 /// Safely truncate a string by byte length to a valid Unicode boundary
 pub fn truncate_str_by_bytes(s: &str, max: usize) -> (String, bool) {
     if s.len() <= max {

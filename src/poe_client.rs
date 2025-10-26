@@ -9,7 +9,7 @@ use poe_api_process::{ChatMessage, ChatRequest, ChatResponse, PoeClient, PoeErro
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub struct PoeClientWrapper {
     pub client: PoeClient, // Modify to public for external access
@@ -265,7 +265,13 @@ pub async fn create_chat_request(
     // Process tool results messages
     let mut tool_results = None;
     // Check if there are tool role messages, and convert them to ToolResult
-    if messages.iter().any(|msg| msg.role == "tool") {
+    let tool_message_count = messages.iter().filter(|msg| msg.role == "tool").count();
+    if tool_message_count > 0 {
+        debug!(
+            "🔍 Found {} tool messages, building tool_call_id mapping",
+            tool_message_count
+        );
+
         // First build mapping from tool_call_id to tool name
         let mut tool_call_id_to_name: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
@@ -274,6 +280,10 @@ pub async fn create_chat_request(
         for msg in &messages {
             if msg.role == "assistant" {
                 if let Some(tool_calls) = &msg.tool_calls {
+                    debug!(
+                        "🔧 Found assistant message with {} tool_calls",
+                        tool_calls.len()
+                    );
                     for tool_call in tool_calls {
                         tool_call_id_to_name
                             .insert(tool_call.id.clone(), tool_call.function.name.clone());
@@ -286,19 +296,30 @@ pub async fn create_chat_request(
             }
         }
 
+        debug!(
+            "🔍 Tool call mapping built: {} entries | Tool messages to process: {}",
+            tool_call_id_to_name.len(),
+            tool_message_count
+        );
+
         let mut results = Vec::new();
         for msg in messages {
             if msg.role == "tool" {
                 // Prioritize using new tool_call_id field
                 let tool_call_id = if let Some(id) = &msg.tool_call_id {
+                    debug!("✅ Tool call ID from field: {}", id);
                     id.clone()
                 } else {
                     // If no tool_call_id field, try to extract from content
                     let content_text = get_text_from_openai_content(&msg.content);
                     if let Some(id) = extract_tool_call_id(&content_text) {
+                        debug!("⚠️ Tool call ID extracted from content: {}", id);
                         id
                     } else {
-                        debug!("⚠️ Unable to extract tool_call_id from tool message");
+                        error!(
+                            "❌ Cannot extract tool_call_id from tool message | Content: {:?}",
+                            content_text
+                        );
                         continue;
                     }
                 };
@@ -307,14 +328,20 @@ pub async fn create_chat_request(
                 let tool_name = tool_call_id_to_name.get(&tool_call_id)
                     .cloned()
                     .unwrap_or_else(|| {
-                        debug!("⚠️ Unable to find tool name corresponding to tool_call_id {}, using unknown", tool_call_id);
+                        error!(
+                            "❌ Unable to find tool name for tool_call_id: {} | Available IDs: {:?}",
+                            tool_call_id,
+                            tool_call_id_to_name.keys().collect::<Vec<_>>()
+                        );
                         "unknown".to_string()
                     });
 
                 let content_text = get_text_from_openai_content(&msg.content);
                 debug!(
-                    "🔧 Processing tool result | tool_call_id: {} | Tool name: {}",
-                    tool_call_id, tool_name
+                    "🔧 Processing tool result | tool_call_id: {} | Tool name: {} | Content length: {}",
+                    tool_call_id,
+                    tool_name,
+                    content_text.len()
                 );
                 results.push(poe_api_process::types::ChatToolResult {
                     role: "tool".to_string(),
@@ -325,10 +352,24 @@ pub async fn create_chat_request(
             }
         }
         if !results.is_empty() {
-            tool_results = Some(results);
-            debug!(
-                "🔧 Created {} tool results",
-                tool_results.as_ref().unwrap().len()
+            tool_results = Some(results.clone());
+            debug!("✅ Created {} tool results for Poe API", results.len());
+            for result in &results {
+                debug!(
+                    "   📋 Tool result | ID: {} | Name: {} | Content preview: {}",
+                    result.tool_call_id,
+                    result.name,
+                    if result.content.len() > 100 {
+                        format!("{}...", &result.content[..100])
+                    } else {
+                        result.content.clone()
+                    }
+                );
+            }
+        } else {
+            warn!(
+                "⚠️ No valid tool results created despite {} tool messages",
+                tool_message_count
             );
         }
     }

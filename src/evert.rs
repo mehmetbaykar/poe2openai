@@ -420,7 +420,20 @@ impl EventHandler for JsonEventHandler {
         debug!("📝 Processing JSON event");
         if let Some(ChatResponseData::ToolCalls(tool_calls)) = &event.data {
             debug!("🔧 Processing tool calls, count: {}", tool_calls.len());
+            for tool_call in tool_calls {
+                debug!(
+                    "   🔧 Tool call from Poe | ID: {} | Type: {} | Function: {} | Args length: {}",
+                    tool_call.id,
+                    tool_call.r#type,
+                    tool_call.function.name,
+                    tool_call.function.arguments.len()
+                );
+            }
             ctx.tool_calls.extend(tool_calls.clone());
+            debug!(
+                "✅ Tool calls preserved with IDs from Poe (total accumulated: {})",
+                ctx.tool_calls.len()
+            );
             // Return Some, indicating tool calls need to be sent
             return Some("tool_calls".to_string());
         }

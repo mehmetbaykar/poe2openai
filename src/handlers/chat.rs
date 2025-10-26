@@ -5,7 +5,7 @@ use crate::types::*;
 use crate::utils::{
     convert_poe_error_to_openai, count_completion_tokens, count_message_tokens,
     format_bytes_length, format_duration, pretty_json_truncated, process_message_images,
-    redact_headers, redact_json_fields,
+    redact_headers, redact_json_fields, validate_tool_sequence,
 };
 use chrono::Utc;
 use futures_util::future::{self};
@@ -195,6 +195,21 @@ pub async fn chat_completions(req: &mut Request, res: &mut Response) {
     // Calculate prompt_tokens
     let prompt_tokens = count_message_tokens(&messages);
     debug!("📊 Calculated prompt_tokens: {}", prompt_tokens);
+
+    // Validate tool message sequence before processing
+    if let Err(validation_error) = validate_tool_sequence(&messages) {
+        error!("❌ Tool message validation failed: {}", validation_error);
+        res.status_code(StatusCode::BAD_REQUEST);
+        res.render(Json(OpenAIErrorResponse {
+            error: OpenAIError {
+                message: format!("Tool calling validation failed: {}", validation_error),
+                r#type: "invalid_request_error".to_string(),
+                code: "invalid_tool_sequence".to_string(),
+                param: Some("messages".to_string()),
+            },
+        }));
+        return;
+    }
 
     let stream = chat_request.stream.unwrap_or(false);
     debug!(
