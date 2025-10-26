@@ -224,48 +224,15 @@ pub async fn create_chat_request(
         "🔍 Model {} replace_response setting: {}",
         model, should_replace_response
     );
-    let query = messages
-        .iter()
-        .enumerate()
-        .map(|(index, msg)| {
-            let original_role = &msg.role;
-            let role_override = match original_role.as_str() {
-                // Always convert assistant to bot
-                "assistant" => Some("bot".to_string()),
-                // Always convert developer to user
-                "developer" => Some("user".to_string()),
-                // Always convert tool to user
-                "tool" => Some("user".to_string()),
-                // Only convert system to user when replace_response is true
-                "system" if should_replace_response => Some("user".to_string()),
-                // Keep others as is
-                _ => None,
-            };
-            // Convert OpenAI message to Poe message
-            // Apply suffix processing only to the last user message
-            let is_last_user_message = msg.role == "user" && index == messages.len() - 1;
-            let request_param = if is_last_user_message {
-                Some(chat_completion_request)
-            } else {
-                None
-            };
-            let poe_message = openai_message_to_poe(msg, role_override, request_param);
-            // Log conversion result
-            debug!(
-                "🔄 Processing message | Original role: {} | Converted role: {} | Content length: {} | Attachment count: {}",
-                original_role,
-                poe_message.role,
-                crate::utils::format_bytes_length(poe_message.content.len()),
-                poe_message.attachments.as_ref().map_or(0, |a| a.len())
-            );
-            poe_message
-        })
-        .collect();
 
-    // Process tool results messages
+    // Process tool results messages BEFORE consuming messages
     let mut tool_results = None;
+    let mut assistant_tool_calls: Option<Vec<poe_api_process::types::ChatToolCall>> = None;
+
     // Check if there are tool role messages, and convert them to ToolResult
     let tool_message_count = messages.iter().filter(|msg| msg.role == "tool").count();
+    let message_count_for_validation = messages.len(); // Store for later validation
+
     if tool_message_count > 0 {
         debug!(
             "🔍 Found {} tool messages, building tool_call_id mapping",
@@ -275,8 +242,12 @@ pub async fn create_chat_request(
         // First build mapping from tool_call_id to tool name
         let mut tool_call_id_to_name: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
+        let mut accumulated_tool_calls: Vec<poe_api_process::types::ChatToolCall> = Vec::new();
+        let mut seen_tool_call_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         // Extract tool call info from previous assistant messages
+        // CRITICAL: Also store the tool_calls to send to Poe
         for msg in &messages {
             if msg.role == "assistant" {
                 if let Some(tool_calls) = &msg.tool_calls {
@@ -284,6 +255,8 @@ pub async fn create_chat_request(
                         "🔧 Found assistant message with {} tool_calls",
                         tool_calls.len()
                     );
+
+                    // Build mapping for tool_results name lookup
                     for tool_call in tool_calls {
                         tool_call_id_to_name
                             .insert(tool_call.id.clone(), tool_call.function.name.clone());
@@ -291,9 +264,35 @@ pub async fn create_chat_request(
                             "🔧 Mapping tool call | ID: {} | Name: {}",
                             tool_call.id, tool_call.function.name
                         );
+                        if seen_tool_call_ids.insert(tool_call.id.clone()) {
+                            accumulated_tool_calls.push(tool_call.clone());
+                        } else {
+                            debug!(
+                                "⚠️ Duplicate tool_call ID detected in conversation, skipping duplicate entry | ID: {}",
+                                tool_call.id
+                            );
+                        }
                     }
                 }
             }
+        }
+
+        if !accumulated_tool_calls.is_empty() {
+            assistant_tool_calls = Some(accumulated_tool_calls);
+        }
+
+        // Log what we extracted
+        if let Some(ref calls) = assistant_tool_calls {
+            debug!(
+                "✅ Extracted {} tool_calls from assistant messages to send to Poe",
+                calls.len()
+            );
+            for tc in calls {
+                debug!("   📞 Tool call: {} (ID: {})", tc.function.name, tc.id);
+            }
+        } else {
+            error!("❌ No tool_calls found in assistant messages but tool messages exist!");
+            error!("   This will cause 'No tool call found' error from Poe!");
         }
 
         debug!(
@@ -303,7 +302,7 @@ pub async fn create_chat_request(
         );
 
         let mut results = Vec::new();
-        for msg in messages {
+        for msg in &messages {
             if msg.role == "tool" {
                 // Prioritize using new tool_call_id field
                 let tool_call_id = if let Some(id) = &msg.tool_call_id {
@@ -373,6 +372,91 @@ pub async fn create_chat_request(
             );
         }
     }
+
+    // CRITICAL VALIDATION: If we have tool_results, we MUST have tool_calls
+    if tool_results.is_some() && assistant_tool_calls.is_none() {
+        error!("❌ CRITICAL: tool_results present but no assistant tool_calls found!");
+        error!("   This will cause 'No tool call found' error from Poe");
+        error!(
+            "   Total messages in conversation: {}",
+            message_count_for_validation
+        );
+    }
+
+    // Validate: All tool_result IDs must exist in tool_calls
+    if let (Some(calls), Some(results)) = (&assistant_tool_calls, &tool_results) {
+        let call_ids: std::collections::HashSet<String> =
+            calls.iter().map(|c| c.id.clone()).collect();
+        info!(
+            "🔍 Validation | Tool calls count: {} | Tool results count: {}",
+            calls.len(),
+            results.len()
+        );
+        for call in calls {
+            debug!(
+                "   ✅ Tool call available | ID: {} | Name: {}",
+                call.id, call.function.name
+            );
+        }
+        for result in results {
+            if call_ids.contains(&result.tool_call_id) {
+                debug!(
+                    "   ✅ Tool result matches | ID: {} | Name: {}",
+                    result.tool_call_id, result.name
+                );
+            } else {
+                let available_ids: Vec<&str> = call_ids.iter().map(|id| id.as_str()).collect();
+                error!(
+                    "❌ CRITICAL MISMATCH: tool_result '{}' references ID '{}' which is NOT in tool_calls!",
+                    result.name, result.tool_call_id
+                );
+                error!("   Available tool_call IDs: {:?}", available_ids);
+                error!("   This WILL cause 'No tool call found' error from Poe!");
+            }
+        }
+    }
+
+    let query = messages
+        .iter()
+        .enumerate()
+        .map(|(index, msg)| {
+            let original_role = &msg.role;
+            let role_override = match original_role.as_str() {
+                // Always convert assistant to bot
+                "assistant" => Some("bot".to_string()),
+                // Always convert developer to user
+                "developer" => Some("user".to_string()),
+                // Always convert tool to user
+                "tool" => Some("user".to_string()),
+                // Only convert system to user when replace_response is true
+                "system" if should_replace_response => Some("user".to_string()),
+                // Keep others as is
+                _ => None,
+            };
+            // Convert OpenAI message to Poe message
+            // Apply suffix processing only to the last user message
+            let is_last_user_message = msg.role == "user" && index == messages.len() - 1;
+            let request_param = if is_last_user_message {
+                Some(chat_completion_request)
+            } else {
+                None
+            };
+            let poe_message = openai_message_to_poe(msg, role_override, request_param);
+            // Log conversion result
+            debug!(
+                "🔄 Processing message | Original role: {} | Converted role: {} | Content length: {} | Attachment count: {}",
+                original_role,
+                poe_message.role,
+                crate::utils::format_bytes_length(poe_message.content.len()),
+                poe_message.attachments.as_ref().map_or(0, |a| a.len())
+            );
+            poe_message
+        })
+        .collect();
+
+    // Note: tool_results and assistant_tool_calls were already extracted above
+    // before processing messages, so they're ready to use
+
     ChatRequest {
         version: "1.1".to_string(),
         r#type: "query".to_string(),
@@ -382,7 +466,7 @@ pub async fn create_chat_request(
         conversation_id: "".to_string(),
         message_id: "".to_string(),
         tools,
-        tool_calls: None,
+        tool_calls: assistant_tool_calls,
         tool_results,
         logit_bias,
         stop_sequences: stop,

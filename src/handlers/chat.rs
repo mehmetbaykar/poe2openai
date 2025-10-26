@@ -571,7 +571,7 @@ impl OutputGenerator {
             choices: vec![Choice {
                 index: 0,
                 delta: tool_delta,
-                finish_reason: Some("tool_calls".to_string()),
+                finish_reason: None,
             }],
         }
     }
