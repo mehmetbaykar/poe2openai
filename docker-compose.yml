@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  poe2openai:
+    image: mehmetbaykar/poe2openai:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=123456
+      - MAX_REQUEST_SIZE=1073741824
+      - LOG_LEVEL=info
+      - RUST_BACKTRACE=1
+      - TZ=Asia/Taipei
+      - CONFIG_DIR=/data
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

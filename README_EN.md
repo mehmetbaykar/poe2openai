@@ -2,10 +2,10 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docker Version](https://img.shields.io/docker/v/jeromeleong/poe2openai?sort=semver)](https://hub.docker.com/r/jeromeleong/poe2openai)
-[![Docker Size](https://img.shields.io/docker/image-size/jeromeleong/poe2openai/latest
-)](https://hub.docker.com/r/jeromeleong/poe2openai)
-[![Docker Pulls](https://img.shields.io/docker/pulls/jeromeleong/poe2openai)](https://hub.docker.com/r/jeromeleong/poe2openai)
+[![Docker Version](https://img.shields.io/docker/v/mehmetbaykar/poe2openai?sort=semver)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
+[![Docker Size](https://img.shields.io/docker/image-size/mehmetbaykar/poe2openai/latest
+)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
+[![Docker Pulls](https://img.shields.io/docker/pulls/mehmetbaykar/poe2openai)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
 
 [ [English](https://github.com/jeromeleong/poe2openai/blob/master/README_EN.md) | [繁體中文](https://github.com/jeromeleong/poe2openai/blob/master/README.md) | [简体中文](https://github.com/jeromeleong/poe2openai/blob/master/README_CN.md) ]
 
@@ -40,13 +40,13 @@ Poe2OpenAI is a proxy service that converts the POE API to OpenAI API format. It
 ### Using Docker (Simple Deployment)
 ```bash
 # Pull the image
-docker pull jeromeleong/poe2openai:latest
+docker pull mehmetbaykar/poe2openai:latest
 # Run the container
 docker run --name poe2openai -d \
   -p 8080:8080 \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=123456 \
-  jeromeleong/poe2openai:latest
+  mehmetbaykar/poe2openai:latest
 ```
 
 #### Data Persistence (Optional)
@@ -67,7 +67,7 @@ Modify according to your personal requirements
 version: '3.8'
 services:
   poe2openai:
-    image: jeromeleong/poe2openai:latest
+    image: mehmetbaykar/poe2openai:latest
     ports:
       - "8080:8080"
     environment:
@@ -102,7 +102,7 @@ cargo build --release
 ## 🚀 Quick Start
 1. Start the service using Docker:
 ```bash
-docker run -d -p 8080:8080 jeromeleong/poe2openai:latest
+docker run -d -p 8080:8080 mehmetbaykar/poe2openai:latest
 ```
 2. The server starts by default at `http://localhost:8080`
 3. Usage example:
@@ -244,7 +244,7 @@ A: All models available on the POE platform are supported. You can query them vi
 ### Q: How do I change the server port?
 A: You can modify it by setting the `PORT` environment variable, for example:
 ```bash
-docker run -d -e PORT=3000 -p 3000:3000 jeromeleong/poe2openai:latest
+docker run -d -e PORT=3000 -p 3000:3000 mehmetbaykar/poe2openai:latest
 ```
 
 ### Q: How do I configure models using models.yaml?
@@ -252,6 +252,20 @@ A: You can configure models in the admin interface at `/admin`, or manually edit
 
 ### Q: How do I handle request rate limits?
 A: You can control the request interval by setting the `RATE_LIMIT_MS` environment variable in milliseconds. Set to `0` to disable limits.
+
+## 🐳 Docker Hub Automated Builds
+
+This project uses GitHub Actions to automatically build and publish Docker images to Docker Hub whenever changes are pushed to the main branch.
+
+### Repository Information
+- **Docker Hub Repository**: `mehmetbaykar/poe2openai`
+- **Image Tag**: `latest`
+- **Automated Builds**: Triggered on every push to the main branch
+
+### Docker Pull Command
+```bash
+docker pull mehmetbaykar/poe2openai:latest
+```
 
 ## 🤝 Contributing
 All forms of contribution are welcome! If you find issues or have suggestions for improvements, please submit an Issue or Pull Request.

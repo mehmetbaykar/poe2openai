@@ -2,10 +2,10 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docker Version](https://img.shields.io/docker/v/jeromeleong/poe2openai?sort=semver)](https://hub.docker.com/r/jeromeleong/poe2openai)
-[![Docker Size](https://img.shields.io/docker/image-size/jeromeleong/poe2openai/latest
-)](https://hub.docker.com/r/jeromeleong/poe2openai)
-[![Docker Pulls](https://img.shields.io/docker/pulls/jeromeleong/poe2openai)](https://hub.docker.com/r/jeromeleong/poe2openai)
+[![Docker Version](https://img.shields.io/docker/v/mehmetbaykar/poe2openai?sort=semver)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
+[![Docker Size](https://img.shields.io/docker/image-size/mehmetbaykar/poe2openai/latest
+)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
+[![Docker Pulls](https://img.shields.io/docker/pulls/mehmetbaykar/poe2openai)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
 
 [ [English](https://github.com/jeromeleong/poe2openai/blob/master/README_EN.md) | [繁體中文](https://github.com/jeromeleong/poe2openai/blob/master/README.md) | [简体中文](https://github.com/jeromeleong/poe2openai/blob/master/README_CN.md) ]
 
@@ -40,13 +40,13 @@ Poe2OpenAI 是一个将 POE API 转换为 OpenAI API 格式的代理服务。让
 ### 使用 Docker（简单部署）
 ```bash
 # 拉取镜像
-docker pull jeromeleong/poe2openai:latest
+docker pull mehmetbaykar/poe2openai:latest
 # 运行容器
 docker run --name poe2openai -d \
   -p 8080:8080 \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=123456 \
-  jeromeleong/poe2openai:latest
+  mehmetbaykar/poe2openai:latest
 ```
 
 #### 数据持久化（可选）
@@ -60,7 +60,7 @@ docker run --name poe2openai -d \
   -e CONFIG_DIR=/data \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=123456 \
-  jeromeleong/poe2openai:latest
+  mehmetbaykar/poe2openai:latest
 ```
 
 ### 使用 Docker Compose
@@ -69,7 +69,7 @@ docker run --name poe2openai -d \
 version: '3.8'
 services:
   poe2openai:
-    image: jeromeleong/poe2openai:latest
+    image: mehmetbaykar/poe2openai:latest
     ports:
       - "8080:8080"
     environment:
@@ -102,7 +102,7 @@ cargo build --release
 ## 🚀 快速开始
 1. 使用 Docker 启动服务：
 ```bash
-docker run -d -p 8080:8080 jeromeleong/poe2openai:latest
+docker run -d -p 8080:8080 mehmetbaykar/poe2openai:latest
 ```
 2. 服务器默认在 `http://localhost:8080` 启动
 3. 使用方式示例：
@@ -244,7 +244,7 @@ A: 支持所有 POE 平台上可用的模型，可通过 `/v1/models` 端点查�
 ### Q: 如何修改服务器端口？
 A: 可以通过设置环境变量 `PORT` 来修改，例如：
 ```bash
-docker run -d -e PORT=3000 -p 3000:3000 jeromeleong/poe2openai:latest
+docker run -d -e PORT=3000 -p 3000:3000 mehmetbaykar/poe2openai:latest
 ```
 
 ### Q: 如何使用 models.yaml 配置模型？
@@ -252,6 +252,20 @@ A: 在管理界面 `/admin` 页面中可以进行模型配置，也可以手动�
 
 ### Q: 如何处理请求频率限制？
 A: 可以通过设置环境变量 `RATE_LIMIT_MS` 来控制请求间隔，单位为毫秒。设置为 `0` 则禁用限制。
+
+## 🐳 Docker Hub 自动构建
+
+本项目使用 GitHub Actions 在每次推送到主分支时自动构建并发布 Docker 镜像到 Docker Hub。
+
+### 仓库信息
+- **Docker Hub 仓库**: `mehmetbaykar/poe2openai`
+- **镜像标签**: `latest`
+- **自动构建**: 在每次推送到主分支时触发
+
+### Docker 拉取命令
+```bash
+docker pull mehmetbaykar/poe2openai:latest
+```
 
 ## 🤝 贡献指南
 欢迎所有形式的贡献！如果您发现了问题或有改进建议，请提交 Issue 或 Pull Request。

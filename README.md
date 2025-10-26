@@ -2,10 +2,10 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Docker Version](https://img.shields.io/docker/v/jeromeleong/poe2openai?sort=semver)](https://hub.docker.com/r/jeromeleong/poe2openai)
-[![Docker Size](https://img.shields.io/docker/image-size/jeromeleong/poe2openai/latest
-)](https://hub.docker.com/r/jeromeleong/poe2openai)
-[![Docker Pulls](https://img.shields.io/docker/pulls/jeromeleong/poe2openai)](https://hub.docker.com/r/jeromeleong/poe2openai)
+[![Docker Version](https://img.shields.io/docker/v/mehmetbaykar/poe2openai?sort=semver)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
+[![Docker Size](https://img.shields.io/docker/image-size/mehmetbaykar/poe2openai/latest
+)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
+[![Docker Pulls](https://img.shields.io/docker/pulls/mehmetbaykar/poe2openai)](https://hub.docker.com/r/mehmetbaykar/poe2openai)
 
 [ [English](https://github.com/jeromeleong/poe2openai/blob/master/README_EN.md) | [繁體中文](https://github.com/jeromeleong/poe2openai/blob/master/README.md) | [简体中文](https://github.com/jeromeleong/poe2openai/blob/master/README_CN.md) ]
 
@@ -41,14 +41,14 @@ Poe2OpenAI 是一個將 POE API 轉換為 OpenAI API 格式的代理服務。讓
 ### 使用 Docker（簡單部署）
 ```bash
 # 拉取映像
-docker pull jeromeleong/poe2openai:latest
+docker pull mehmetbaykar/poe2openai:latest
 
 # 運行容器
 docker run --name poe2openai -d \
   -p 8080:8080 \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=123456 \
-  jeromeleong/poe2openai:latest
+  mehmetbaykar/poe2openai:latest
 ```
 
 #### 數據持久化（可選）
@@ -72,7 +72,7 @@ docker run --name poe2openai -d \
 version: '3.8'
 services:
   poe2openai:
-    image: jeromeleong/poe2openai:latest
+    image: mehmetbaykar/poe2openai:latest
     ports:
       - "8080:8080"
     environment:
@@ -108,7 +108,7 @@ cargo build --release
 
 1. 使用 Docker 啟動服務：
 ```bash
-docker run -d -p 8080:8080 jeromeleong/poe2openai:latest
+docker run -d -p 8080:8080 mehmetbaykar/poe2openai:latest
 ```
 
 2. 服務器默認在 `http://localhost:8080` 啟動
@@ -255,7 +255,7 @@ A: 支援所有 POE 平台上可用的模型，可通過 `/v1/models` 端點查�
 ### Q: 如何修改服務器端口？
 A: 可以通過設置環境變量 `PORT` 來修改，例如：
 ```bash
-docker run -d -e PORT=3000 -p 3000:3000 jeromeleong/poe2openai:latest
+docker run -d -e PORT=3000 -p 3000:3000 mehmetbaykar/poe2openai:latest
 ```
 
 ### Q: 如何使用 models.yaml 配置模型？
@@ -263,6 +263,20 @@ A: 在管理介面 `/admin` 頁面中可以進行模型配置，也可以手動�
 
 ### Q: 如何處理請求頻率限制？
 A: 可以通過設置環境變量 `RATE_LIMIT_MS` 來控制請求間隔，單位為毫秒。設置為 `0` 則禁用限制。
+
+## 🐳 Docker Hub 自動建構
+
+本專案使用 GitHub Actions 在每次推送到主分支時自動建構並發布 Docker 映像到 Docker Hub。
+
+### 倉庫資訊
+- **Docker Hub 倉庫**: `mehmetbaykar/poe2openai`
+- **映像標籤**: `latest`
+- **自動建構**: 在每次推送到主分支時觸發
+
+### Docker 拉取命令
+```bash
+docker pull mehmetbaykar/poe2openai:latest
+```
 
 ## 🤝 貢獻指南
 歡迎所有形式的貢獻！如果您發現了問題或有改進建議，請提交 Issue 或 Pull Request。

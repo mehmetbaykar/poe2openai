@@ -5,7 +5,7 @@ edition = "2024"
 publish = ["crates-io"]
 authors = ["Jerome Leong <jeromeleong1998@gmail.com>"]
 description = "Poe API to OpenAI API"
-repository = "https://github.com/jeromeleong/poe2openai"
+repository = "https://github.com/mehmetbaykar/poe2openai"
 license = "MIT"
 keywords = ["poeapi", "openai","ai"]
 
